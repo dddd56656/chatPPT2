@@ -15,17 +15,8 @@ from pptx.slide import SlideLayout, Slide
 from pptx.util import Inches
 
 
-# 假设 exporter 模块存在 (使用 Mock 来避免循环依赖)
-# 在实际运行时，应保证 'from .exporter import PPTExporter' 可用
-class PPTExporter:
-    """Mock Exporter for testing purposes."""
-
-    def export_ppt(self, prs: Presentation, title: str) -> Dict[str, Any]:
-        # 模拟导出：将 prs 保存到 BytesIO
-        buffer = io.BytesIO()
-        prs.save(buffer)
-        buffer.seek(0)
-        return {"buffer": buffer, "filename": f"{title}.pptx"}
+# 导入真实的PPTExporter
+from .exporter import PPTExporter
 
 
 # 配置日志

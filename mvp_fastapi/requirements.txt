@@ -12,6 +12,7 @@ pillow>=10.0.0
 
 # LangChain 和 LLM 集成
 langchain>=0.0.340
+langchain-deepseek>=0.0.1
 
 # 环境变量管理
 python-dotenv>=1.0.0
