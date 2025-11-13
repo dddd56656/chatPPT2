@@ -48,8 +48,9 @@ class TwoColumnSlideModel(BaseModel):
 # --- 2. 系统指令 (V1 架构) ---
 # V1 架构的 Prompt 更简单，只关注当前任务，而不是整个演示文稿
 SYSTEM_PROMPT_BASE = """[系统指令]
-你是一名PPT内容专家。你的唯一目标是生成客观、数据驱动的文本。所有信息必须严格基于你能够查阅到的最新、可验证的资料。
+你是一名PPT内容专家。你的唯一目标是生成客观、数据驱动的文本内容。所有信息必须严格基于你能够查阅到的最新、可验证的资料。
 绝对禁止加入任何主观意见、情感表达或推测性内容。
+注意：你只需要生成文本内容。
 你必须严格按照 Pydantic JSON 格式输出。
 """
 
@@ -89,7 +90,7 @@ class ContentGeneratorV1:
             self.title_chain = ChatPromptTemplate.from_messages(
                 [
                     ("system", SYSTEM_PROMPT_BASE),
-                    ("user", "为主题 '{topic}' 生成一张封面幻灯片（标题和副标题）。"),
+                    ("user", "为主题 '{topic}' 生成封面页的标题和副标题文本内容。"),
                 ]
             ) | self.llm.with_structured_output(TitleSlideModel)
 
@@ -99,7 +100,7 @@ class ContentGeneratorV1:
                     ("system", SYSTEM_PROMPT_BASE),
                     (
                         "user",
-                        "为演示文稿 '{main_topic}'，生成一张关于子主题 '{sub_topic}' 的双栏幻灯片。将 '{topic1}' 放在左栏，'{topic2}' 放在右栏。",
+                        "为演示文稿 '{main_topic}'，生成关于子主题 '{sub_topic}' 的双栏详细文本内容。将 '{topic1}' 相关答案内容放在左栏，'{topic2}' 相关答案内容放在右栏。要求不能左栏和右栏不应当是标题类的内容，应该是大纲的简单答案",
                     ),
                 ]
             ) | self.llm.with_structured_output(TwoColumnSlideModel)
@@ -108,7 +109,7 @@ class ContentGeneratorV1:
             self.content_chain = ChatPromptTemplate.from_messages(
                 [
                     ("system", SYSTEM_PROMPT_BASE),
-                    ("user", "为演示文稿 '{main_topic}' 生成一张总结和展望幻灯片。"),
+                    ("user", "为演示文稿 '{main_topic}' 生成总结和展望的文本内容。"),
                 ]
             ) | self.llm.with_structured_output(ContentSlideModel)
 
@@ -134,11 +135,16 @@ class ContentGeneratorV1:
         logger.info(
             f"V1 架构：开始为 '{main_topic}' 生成 {len(outline) + 2} 张幻灯片..."
         )
+        logger.info(f"大纲内容: {outline}")
+        logger.info(f"总结主题: {summary_topic}")
 
         try:
             # 1. 生成标题页
             logger.info("  正在生成 [Title Slide]...")
-            title_model = self.title_chain.invoke({"topic": main_topic})
+            title_input = {"topic": main_topic}
+            logger.debug(f"  标题页输入参数: {title_input}")
+            title_model = self.title_chain.invoke(title_input)
+            logger.debug(f"  标题页LLM输出: {title_model}")
             slides_data.append(
                 {
                     "slide_type": "title",
@@ -154,14 +160,15 @@ class ContentGeneratorV1:
                 )
                 # [CTO Note - P2 修复]: 异常捕获粒度更细
                 try:
-                    two_col_model = self.two_column_chain.invoke(
-                        {
-                            "main_topic": main_topic,
-                            "sub_topic": item["sub_topic"],
-                            "topic1": item["topic1"],
-                            "topic2": item["topic2"],
-                        }
-                    )
+                    two_col_input = {
+                        "main_topic": main_topic,
+                        "sub_topic": item["sub_topic"],
+                        "topic1": item["topic1"],
+                        "topic2": item["topic2"],
+                    }
+                    logger.debug(f"  双栏页输入参数: {two_col_input}")
+                    two_col_model = self.two_column_chain.invoke(two_col_input)
+                    logger.debug(f"  双栏页LLM输出: {two_col_model}")
                     slides_data.append(
                         {
                             "slide_type": "two_column",
@@ -172,16 +179,19 @@ class ContentGeneratorV1:
                     )
                 except (ValidationError, OutputParserException) as e:
                     logger.error(f"  解析 {item['sub_topic']} 失败，跳过此幻灯片: {e}")
+                    logger.debug(f"  失败时的输入参数: {two_col_input}")
                 except Exception as e:
                     logger.error(
                         f"  API 调用 {item['sub_topic']} 失败，跳过此幻灯片: {e}"
                     )
+                    logger.debug(f"  失败时的输入参数: {two_col_input}")
 
             # 3. 生成总结页
             logger.info("  正在生成 [Content Slide] (总结)...")
-            content_model = self.content_chain.invoke(
-                {"main_topic": main_topic, "summary_topic": summary_topic}
-            )
+            content_input = {"main_topic": main_topic, "summary_topic": summary_topic}
+            logger.debug(f"  总结页输入参数: {content_input}")
+            content_model = self.content_chain.invoke(content_input)
+            logger.debug(f"  总结页LLM输出: {content_model}")
             slides_data.append(
                 {
                     "slide_type": "content",
@@ -191,6 +201,7 @@ class ContentGeneratorV1:
             )
 
             logger.info(f"V1 架构：内容生成完毕，共 {len(slides_data)} 张幻灯片。")
+            logger.debug(f"最终幻灯片数据: {slides_data}")
             return slides_data
 
         except Exception as e:
