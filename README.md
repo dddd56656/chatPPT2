@@ -1,106 +1,97 @@
-# PPT Generator - AI驱动的演示文稿生成器
+# ChatPPT - AI驱动的智能演示文稿生成器
 
-一个基于FastAPI和python-pptx的智能PPT生成系统，能够根据用户提示自动创建专业的演示文稿。
+一个基于FastAPI后端和React前端的现代化PPT生成系统，采用Monorepo架构设计。
 
-## 功能特性
+## 🚀 功能特性
 
-- 🚀 **快速生成**: 基于FastAPI的高性能异步架构
-- 🤖 **智能编排**: 多Agent协作生成大纲、内容和设计
-- 📊 **专业输出**: 使用python-pptx生成标准PPTX格式文件
-- 🌐 **Web界面**: 简洁易用的Web用户界面
-- 🔧 **模块化设计**: 清晰的代码结构和职责分离
+- **智能生成**: 基于多Agent协作自动生成大纲、内容和设计
+- **异步处理**: 使用Celery和Redis实现任务队列和异步处理
+- **现代化架构**: 前后端分离，支持容器化部署
+- **专业输出**: 生成标准PPTX格式的专业演示文稿
+- **实时监控**: 前端实时显示任务进度和状态
 
-## 项目结构
+## 📁 项目结构
 
 ```
-mvp_fastapi/
-├── main.py              # FastAPI应用入口
-├── orchestrator.py      # 核心编排器
-├── services/            # 服务模块
-│   ├── outline.py      # 大纲生成服务
-│   ├── content.py      # 内容生成服务
-│   ├── design.py       # 设计美化服务
-│   └── exporter.py     # 导出服务
-├── templates/          # 前端模板
-│   └── index.html     # 主界面
-├── static/            # 静态资源
-│   └── app.js        # 前端逻辑
-└── requirements.txt   # 依赖管理
+chatPPT/
+├── backend/                    # FastAPI后端服务
+│   ├── app/                   # 应用核心模块
+│   ├── templates/             # 模板文件
+│   └── output/                # 生成文件输出目录
+├── frontend/                  # React前端应用
+│   └── src/                   # 前端源代码
+├── docker-compose.yml         # 容器编排配置
+└── README.md                  # 项目说明文档
 ```
 
-## 快速开始
+## 🛠️ 快速开始
+
+### 使用Docker Compose（推荐）
+
+```bash
+# 一键启动所有服务
+docker-compose up -d
+
+# 访问应用
+# 前端: http://localhost:3000
+# 后端API: http://localhost:8000
+# API文档: http://localhost:8000/docs
+```
+
+### 手动安装
+
+#### 后端服务
+
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+#### 前端服务
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+## 🔧 开发指南
 
 ### 环境要求
 
 - Python 3.8+
-- pip
+- Node.js 16+
+- Redis 6+
+- Docker & Docker Compose（可选）
 
-### 安装依赖
+### 核心架构
 
-```bash
-cd mvp_fastapi
-uv pip install -r requirements.txt
-```
+- **后端**: FastAPI + Celery + Redis
+- **前端**: React + Vite + Axios
+- **任务队列**: Celery用于异步PPT生成
+- **存储**: Redis用于任务状态管理
 
-### 启动服务
+## 📚 API文档
 
-```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
-
-### 访问应用
-
-打开浏览器访问: http://localhost:8000
-
-## API文档
-
-启动服务后，可以访问以下地址查看API文档:
-
+启动后端服务后访问：
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
 
-## 核心API
+### 主要API端点
 
-### POST /generate/ppt
+- `POST /api/tasks` - 创建PPT生成任务
+- `GET /api/tasks/{task_id}` - 获取任务状态
+- `GET /api/tasks/{task_id}/download` - 下载生成的PPT文件
 
-生成PPT演示文稿
+## 🤝 贡献指南
 
-**请求体:**
-```json
-{
-  "prompt": "AI在客户服务中的应用"
-}
-```
+请查看[CONTRIBUTING.md](CONTRIBUTING.md)了解如何为项目做出贡献。
 
-**响应:**
-- 成功: 返回PPTX文件流
-- 失败: 返回错误信息
+## 📄 许可证
 
-## 开发指南
+本项目采用MIT许可证 - 查看[LICENSE](LICENSE)文件了解详情。
 
-### 架构说明
-
-项目采用分层架构设计:
-
-1. **API层** (`main.py`): 处理HTTP请求和响应
-2. **编排层** (`orchestrator.py`): 协调各个服务模块
-3. **服务层** (`services/`): 实现具体的业务逻辑
-4. **前端层** (`templates/`, `static/`): 提供用户界面
-
-### 扩展开发
-
-- 添加新的服务模块到 `services/` 目录
-- 在 `orchestrator.py` 中集成新服务
-- 更新 `requirements.txt` 添加新依赖
-
-## 许可证
-
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情
-
-## 贡献
-
-欢迎提交Issue和Pull Request来改进这个项目！
-
-## 联系方式
+## 🐛 问题报告
 
 如有问题或建议，请通过GitHub Issues联系我们。
