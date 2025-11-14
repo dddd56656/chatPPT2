@@ -11,6 +11,7 @@ python-pptx==0.6.23
 
 # 环境配置
 python-dotenv==1.0.0
+pydantic-settings==2.1.0
 
 # 数据验证
 pydantic==2.5.0

@@ -40,20 +40,54 @@ docker-compose up -d
 
 ### 手动安装
 
-#### 后端服务
+#### 1. 后端服务
 
 ```bash
 cd backend
+
+# 使用uv安装依赖（推荐）
+uv sync
+
+# 或者使用pip安装依赖
 pip install -r requirements.txt
+
+# 启动FastAPI服务器
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-#### 前端服务
+#### 2. Celery Worker（异步任务处理）
+
+**Windows开发环境**：
+```bash
+cd backend
+uv run celery -A app.worker.tasks worker --loglevel=info --pool=solo
+```
+
+**Linux/macOS开发环境**：
+```bash
+cd backend
+uv run celery -A app.worker.tasks worker --loglevel=info
+```
+
+**生产环境**：
+```bash
+cd backend
+celery -A app.worker.tasks worker --concurrency=4 --loglevel=info
+```
+
+#### 3. 前端服务
 
 ```bash
 cd frontend
 npm install
 npm run dev
+```
+
+#### 4. 一键启动（Windows）
+
+使用提供的启动脚本：
+```bash
+start_dev.bat
 ```
 
 ## 🔧 开发指南
@@ -71,6 +105,12 @@ npm run dev
 - **前端**: React + Vite + Axios
 - **任务队列**: Celery用于异步PPT生成
 - **存储**: Redis用于任务状态管理
+
+### 平台兼容性说明
+
+- **Windows**: 开发环境需要使用`--pool=solo`参数启动Celery
+- **Linux/macOS**: 支持标准Celery配置，性能最佳
+- **生产环境**: 建议部署到Linux服务器，使用多进程模式
 
 ## 📚 API文档
 

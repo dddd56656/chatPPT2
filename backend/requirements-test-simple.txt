@@ -1,0 +1,7 @@
+# 简化的测试依赖 - 只包含核心测试包
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+pytest-mock==3.12.0
+httpx==0.25.2
+requests==2.31.0
