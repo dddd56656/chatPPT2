@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     """应用配置类 - 自动从环境变量读取配置"""
     
     # 应用名称 - 对应环境变量 APP_NAME
-    app_name: str = "ChatPPT"
+    app_name: str = "chatppt"
     
     # 调试模式 - 对应环境变量 DEBUG
     debug: bool = False
@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     
     # Celery结果存储地址 - 对应环境变量 CELERY_RESULT_BACKEND
     celery_result_backend: str = "redis://localhost:6379/0"
+    
+    # Celery时区配置 - 对应环境变量 CELERY_TIMEZONE
+    celery_timezone: str = "Asia/Shanghai"
     
     # 输出文件目录 - 对应环境变量 OUTPUT_DIR
     output_dir: str = "./output"
