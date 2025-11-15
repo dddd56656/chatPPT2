@@ -1,6 +1,9 @@
-"""PPT导出服务模块。
+"""
+PPT导出服务模块 (exporter.py)
 
-该模块负责将PPT对象转换为可下载的PPTX文件缓冲区。
+CTO注：此模块职责单一且正确 (Single Responsibility)。
+它只负责将一个 `pptx.Presentation` 内存对象
+转换为一个内存中的 `io.BytesIO` 缓冲区。
 """
 
 import io
@@ -19,7 +22,8 @@ class PPTExporter:
     def export_ppt(
         self, presentation: Presentation, title: Optional[str] = None
     ) -> Dict[str, Any]:
-        """导出PPT为PPTX格式。
+        """
+        [Node 3 调用] 导出PPT为PPTX格式 (内存中)。
 
         Args:
             presentation: PPT对象
@@ -28,10 +32,14 @@ class PPTExporter:
         Returns:
             包含PPTX文件缓冲区和元数据的字典
         """
+        # 1. 创建一个内存中的二进制缓冲区
         buffer = io.BytesIO()
+        # 2. 将 Presentation 对象保存到缓冲区
         presentation.save(buffer)
+        # 3. 将缓冲区的指针移回开头 (以便后续读取)
         buffer.seek(0)
 
+        # 4. 返回包含缓冲区和元数据的数据结构
         return {
             "buffer": buffer,
             "content_type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -40,17 +48,10 @@ class PPTExporter:
         }
 
     def _generate_filename(self, title: Optional[str] = None) -> str:
-        """生成导出文件名。
-
-        Args:
-            title: PPT标题
-
-        Returns:
-            生成的文件名
-        """
+        """生成导出文件名。"""
         base_name = title.replace(" ", "_") if title else "presentation"
         return f"{base_name}.pptx"
 
 
-# 导出服务实例
+# 导出一个单例 (Singleton) 服务实例
 exporter_service = PPTExporter()

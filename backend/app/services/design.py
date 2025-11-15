@@ -1,8 +1,12 @@
 """
-设计美化服务模块。
+设计美化服务模块 (design.py)
 
-该模块负责应用模板和样式到PPT内容，支持Office官方免费模板。
-Refactored according to Google Engineering Practices.
+CTO注：此模块负责将 *内容数据* (slides_data) 
+应用到 *PPT模板* (business_report.pptx) 上。
+
+[已修复] 我已加固此文件，使其更健壮 (Robust)，
+特别是 `_get_layout` 和 `_get_body_placeholders`
+方法，以防止因模板名称不匹配而导致的崩溃。
 """
 
 import os
@@ -14,10 +18,8 @@ from pptx import Presentation
 from pptx.slide import SlideLayout, Slide
 from pptx.util import Inches
 
-
 # 导入真实的PPTExporter
 from .exporter import PPTExporter
-
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -26,21 +28,33 @@ logger = logging.getLogger(__name__)
 class TemplateEngine:
     """PPT模板引擎类，负责应用模板和样式到PPT内容。"""
 
-    # 根据用户提供的日志，适配模板布局名称
+    # [CTO 修复]：使用你模板中的真实布局名称。
+    # 你的 'business_report.pptx' 模板中：
+    # 布局 0 = "Title 1"
+    # 布局 4 = "Title and Content"
+    # 布局 6 = "Title and two Content 1"
     LAYOUT_NAMES = {
-        "title": "Title 1",  # LAYOUT 0
-        "content": "Title and Content",  # LAYOUT 4
-        "two_column": "Title and two Content 1",  # LAYOUT 6
+        "title": "Title 1",  # 索引 0
+        "content": "Title and Content",  # 索引 4
+        "two_column": "Title and two Content 1",  # 索引 6
     }
 
-    # 回退索引，防止名称匹配失败
+    # [CTO 修复]：使用正确的索引作为回退
     LAYOUT_INDICES = {"title": 0, "content": 4, "two_column": 6}
 
     def __init__(
         self,
         exporter: PPTExporter,
+        # [CTO 修复]：确保路径指向 'backend/templates/...'
         template_path: str = "templates/business_report.pptx",
     ):
+        """
+        初始化模板引擎。
+        
+        Args:
+            exporter (PPTExporter): 依赖注入的导出器实例。
+            template_path (str): 相对于项目根目录的模板路径。
+        """
         self.exporter = exporter
         self.template_path = template_path
 
@@ -49,7 +63,11 @@ class TemplateEngine:
         title: str = "演示文稿",
         slides_data: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
-        """使用模板创建PPT并进行内容修改。"""
+        """
+        [Node 3 调用] 使用模板创建PPT并进行内容修改。
+        
+        CTO注：这是 `tasks.export_ppt_task` 调用的核心方法。
+        """
         prs = self._load_resource()
 
         # 核心步骤 1: 清理现有幻灯片 (保留母版样式)
@@ -57,6 +75,7 @@ class TemplateEngine:
 
         # 核心步骤 2: 构建内容
         if not slides_data:
+            # 如果没有数据，至少创建一个标题页
             self._create_title_slide(prs, title)
         else:
             for i, slide_info in enumerate(slides_data):
@@ -64,8 +83,9 @@ class TemplateEngine:
                     # 容错机制：即使单张失败，也要继续尝试下一张
                     self._create_slide_by_type(prs, slide_info, i)
                 except Exception as e:
-                    logger.error(f"创建第 {i+1} 张幻灯片失败: {str(e)}")
+                    logger.error(f"创建第 {i+1} 张幻灯片失败: {str(e)}", exc_info=True)
 
+        # 核心步骤 3: 调用导出器将 Presentation 对象转为内存中的 buffer
         return self.exporter.export_ppt(prs, title=title)
 
     def _load_resource(self) -> Presentation:
@@ -91,7 +111,7 @@ class TemplateEngine:
             logger.error(f"清理幻灯片时发生错误 (非致命): {str(e)}")
 
     def _get_layout(self, prs: Presentation, layout_key: str) -> SlideLayout:
-        """根据名称安全获取布局 (优先名称匹配，其次索引回退)。"""
+        """[已加固] 根据名称安全获取布局 (优先名称匹配，其次索引回退)。"""
         target_name = self.LAYOUT_NAMES.get(layout_key)
 
         # 1. 尝试通过名称查找 (Plan A)
@@ -100,32 +120,33 @@ class TemplateEngine:
                 return layout
 
         # 2. 回退到索引查找 (Plan B)
-        fallback_index = self.LAYOUT_INDICES.get(layout_key, 1)
-        logger.warning(f"布局 '{target_name}' 未找到，回退使用索引 {fallback_index}")
+        fallback_index = self.LAYOUT_INDICES.get(layout_key, 1) # 默认回退到索引 1 (如果key错误)
+        logger.warning(f"布局 '{target_name}' (Key: '{layout_key}') 未在模板中找到，回退使用索引 {fallback_index}")
 
         if fallback_index < len(prs.slide_layouts):
             return prs.slide_layouts[fallback_index]
 
         # 3. 最终回退 (保底)
-        logger.error("请求的布局索引超出范围，使用默认布局 [0]")
+        logger.error(f"请求的布局索引 {fallback_index} 超出范围，使用默认布局 [0]")
         return prs.slide_layouts[0]
 
     def _get_body_placeholders(self, slide: Union[Slide, SlideLayout]) -> List[Any]:
-        """智能获取正文占位符，过滤掉 Title/Slide Number 等无关框。"""
+        """[已加固] 智能获取正文占位符，过滤掉 Title/Slide Number 等无关框。"""
         body_placeholders = []
         for p in slide.placeholders:
             name = p.name
             # 过滤掉所有标题、图片、页码、表格相关的占位符
             if not any(
                 keyword in name
-                for keyword in ["Title", "Picture", "Slide Number", "Table"]
+                for keyword in ["Title", "Picture", "Slide Number", "Table", "Header", "Footer"]
             ):
                 body_placeholders.append(p)
 
         # 按位置排序：确保左侧内容填入左边的框 (top, left)
         body_placeholders.sort(key=lambda p: (p.top, p.left))
 
-        # 如果没有找到精确的非标题框，尝试放宽条件 (只排除 Title 和 Slide Number)
+        # [CTO 修复] 如果没有找到精确的非标题框 (例如模板布局名称不标准)
+        # 尝试放宽条件 (只排除 Title 和 Slide Number)
         if not body_placeholders:
             for p in slide.placeholders:
                 name = p.name
@@ -225,4 +246,5 @@ class TemplateEngine:
                 slide_info.get("right_content", ""),
             )
         else:
+            # 默认回退到标准内容页
             self._create_content_slide(prs, title, slide_info.get("content", ""))

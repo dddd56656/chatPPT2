@@ -1,7 +1,13 @@
 """
 大纲生成服务 (outline.py) - V1 架构
 
-此模块负责根据用户提示生成PPT大纲结构，并调用ContentGeneratorV1生成完整PPT内容。
+CTO注：此模块是 "V1 架构" 的 *入口点*。
+它负责生成大纲 (Node 1)，但错误地也包含了
+内容生成和文件保存 (Node 2 & 3) 的逻辑，
+这违反了单一职责原则。
+
+`app/worker/tasks.py` 中的 `generate_outline_task` (Node 1)
+*应该* 只调用此文件中的 `generate_outline`。
 """
 
 import os
@@ -12,7 +18,12 @@ from langchain_deepseek import ChatDeepSeek
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 from langchain_core.exceptions import OutputParserException
+# [CTO 修复] 导入 settings 以获取 output_dir
+from app.core.config import settings
 
+# [CTO注 - 架构缺陷]：Outline (大纲) 服务不应该导入
+# Content (内容) 和 Design (设计) 服务。
+# 这种交叉导入导致了单体应用 (Monolith)。
 from .content import ContentGeneratorV1
 from .design import TemplateEngine
 
@@ -48,10 +59,8 @@ class OutlineGenerator:
     """
     大纲生成服务。
     
-    负责：
-    1. 根据用户提示生成PPT大纲结构
-    2. 调用ContentGeneratorV1生成完整PPT内容
-    3. 协调整个PPT生成流程
+    [CTO注]：此类目前职责混乱 (fat service)。
+    它同时做了 Node 1, 2, 3 的工作。
     """
     
     def __init__(self):
@@ -68,7 +77,7 @@ class OutlineGenerator:
                 model="deepseek-chat", temperature=0, api_key=self.api_key
             )
             
-            # 大纲生成链
+            # 大纲生成链 (Node 1)
             self.outline_chain = ChatPromptTemplate.from_messages([
                 ("system", OUTLINE_SYSTEM_PROMPT),
                 ("user", "根据以下用户需求生成PPT大纲：\n{user_prompt}")
@@ -80,13 +89,9 @@ class OutlineGenerator:
     
     def generate_outline(self, user_prompt: str) -> Dict[str, Any]:
         """
-        根据用户提示生成PPT大纲
+        [Node 1: 正确] 根据用户提示生成PPT大纲
         
-        Args:
-            user_prompt (str): 用户的需求描述
-            
-        Returns:
-            Dict[str, Any]: 包含大纲信息的字典
+        CTO注：这是此服务应该暴露的 *唯一* 核心方法。
         """
         logger.info(f"开始生成大纲，用户需求：{user_prompt}")
         
@@ -99,6 +104,7 @@ class OutlineGenerator:
             
             logger.info(f"大纲生成成功：主主题 '{outline_model.main_topic}'，包含 {len(outline_model.outline)} 个双栏页")
             
+            # 返回的数据结构 (被 Node 1 Task 使用)
             return {
                 "main_topic": outline_model.main_topic,
                 "outline": outline_model.outline,
@@ -116,31 +122,28 @@ class OutlineGenerator:
     
     def generate_complete_ppt(self, user_prompt: str, template_engine: TemplateEngine) -> Dict[str, Any]:
         """
-        完整的PPT生成流程：大纲生成 + 内容生成 + PPT文件创建
+        [Node 1+2+3: 错误] 完整的PPT生成流程 (单体方法)
         
-        Args:
-            user_prompt (str): 用户的需求描述
-            template_engine (TemplateEngine): 模板引擎实例
-            
-        Returns:
-            Dict[str, Any]: 包含生成结果的字典
+        CTO注：这是一个 *已弃用* (deprecated) 的方法。
+        它被旧的 `generate_ppt_task` (已修复) 错误地调用。
+        新的 `generate_ppt_workflow` (V2) 不再使用此方法。
         """
+        logger.warning("正在调用已弃用的 (单体) `generate_complete_ppt` 服务")
         logger.info("开始完整PPT生成流程")
         
         try:
-            # 1. 生成大纲
+            # 1. 生成大纲 (Node 1)
             outline_result = self.generate_outline(user_prompt)
             if outline_result["status"] == "error":
                 return outline_result
             
-            # 2. 验证大纲格式是否符合content.py的期望
             outline_data = outline_result["outline"]
             logger.info(f"大纲数据: {outline_data}")
             
             # 3. 初始化内容生成器
             content_generator = ContentGeneratorV1(template_engine)
             
-            # 4. 生成PPT内容数据 - 将大纲传递给内容生成器
+            # 4. 生成PPT内容数据 (Node 2)
             slides_data = content_generator.generate_ppt_data_v1(
                 main_topic=outline_result["main_topic"],
                 outline=outline_data,
@@ -148,13 +151,13 @@ class OutlineGenerator:
             )
             logger.info(slides_data)
 
-            # 4. 创建PPT文件
+            # 4. 创建PPT文件 (Node 3 - Export)
             ppt_result = content_generator.create_ppt_file(
                 slides_data=slides_data,
                 output_title=outline_result["main_topic"]
             )
             
-            # 5. 保存文件到output目录
+            # 5. 保存文件到output目录 (Node 3 - Save)
             file_path = self._save_ppt_file(ppt_result, outline_result["main_topic"])
             
             logger.info("完整PPT生成流程完成")
@@ -164,7 +167,7 @@ class OutlineGenerator:
                 "main_topic": outline_result["main_topic"],
                 "outline": outline_result["outline"],
                 "slides_count": len(slides_data),
-                "ppt_file": file_path,
+                "ppt_file": file_path, # [CTO注]：返回的是文件路径
                 "message": "PPT生成成功"
             }
             
@@ -177,25 +180,25 @@ class OutlineGenerator:
             }
     
     def _save_ppt_file(self, ppt_result: Dict[str, Any], title: str) -> str:
-        """保存PPT文件到output目录"""
+        """
+        [Node 3: 错误] 保存PPT文件到output目录
+        
+        CTO注：此IO逻辑不应属于 Outline 服务。
+        它已被移至 `tasks.export_ppt_task`。
+        """
         try:
-            # 确保output目录存在
-            output_dir = "output"
+            output_dir = settings.output_dir
             if not os.path.exists(output_dir):
                 os.makedirs(output_dir)
             
-            # 生成文件名
             filename = f"{title.replace(' ', '_')}.pptx"
             file_path = os.path.join(output_dir, filename)
             
-            # 保存文件 - 使用真实PPTExporter返回的数据结构
             buffer = ppt_result.get("buffer")
             if buffer:
-                # 确保buffer在文件开头
                 if hasattr(buffer, "seek"):
                     buffer.seek(0)
                 
-                # 写入文件
                 with open(file_path, "wb") as f:
                     if hasattr(buffer, "getvalue"):
                         f.write(buffer.getvalue())
@@ -206,7 +209,8 @@ class OutlineGenerator:
                         return ""
                 
                 logger.info(f"PPT文件已保存: {file_path}")
-                return file_path
+                # [CTO注]：返回绝对路径以确保API端点能找到它
+                return os.path.abspath(file_path)
             else:
                 logger.error("PPT结果中没有有效的buffer数据")
                 return ""
