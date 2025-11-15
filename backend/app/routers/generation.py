@@ -17,7 +17,7 @@ import logging
 # 1. 导入 *服务* (用于同步调用)
 #    我们直接从 tasks.py 导入全局服务实例
 #    (CTO注: 在大型项目中，这应该来自一个专门的服务层)
-from app.worker.tasks import outline_generator, template_engine
+from app.worker.tasks import outline_generator, template_engine, content_generator
 
 # 2. 导入 *Celery任务* (仅用于异步导出)
 #    [CTO注]：我们调用的是 *修复后* 的 `export_ppt_task`
@@ -73,37 +73,60 @@ def sync_generate_content(request: ContentRequest):
     
     接收大纲 (可能已被聊天框修改) 和提示词，立即返回内容。
     
-    [CTO注]: 此端点在您的原始代码中是缺失的，但对于
-    一个完整的聊天流程是必需的。
+    [CTO 修复]: 此端点逻辑已实现。
     """
     try:
-        # TODO: 此处应调用 *新* 的 Content Generator 服务
-        # `outline_generator.generate_complete_ppt` 是一个单体服务
-        # 您需要重构 `ContentGeneratorV1` 以便能在此处被独立调用。
+        # [CTO 修复] 检查 content_generator 是否已初始化
+        if not content_generator:
+            raise HTTPException(status_code=503, detail="Content Generator 未初始化")
         
-        # 临时占位符
-        raise HTTPException(status_code=501, detail="内容生成服务 (Node 2) 尚未实现")
+        # [CTO 修复] 从 request.outline (这是一个字典) 中提取所需参数
+        # (request.outline 对应前端的 finalOutline 对象)
+        outline_data = request.outline
+        main_topic = outline_data.get("main_topic")
+        outline_list = outline_data.get("outline")
+        summary_topic = outline_data.get("summary_topic")
+
+        if not all([main_topic, outline_list, summary_topic]):
+            logger.warning(f"sync_generate_content 收到无效的大纲数据: {outline_data}")
+            raise HTTPException(status_code=422, detail="收到无效或不完整的大纲数据")
+
+        # [CTO 修复] 调用 V1 内容生成器服务 (同步)
+        # 注意：我们忽略了 request.user_prompt (例如 "开始生成")
+        # 因为 V1 服务 (generate_ppt_data_v1) 只需要大纲。
+        slides_data = content_generator.generate_ppt_data_v1(
+            main_topic=main_topic,
+            outline=outline_list,
+            summary_topic=summary_topic
+        )
         
-        # 理想的调用方式:
-        # if not content_generator:
-        #     raise HTTPException(status_code=503, detail="Content Generator 未初始化")
-        #
-        # content_result = content_generator.generate_ppt_data_v1(
-        #     main_topic=request.outline.get("main_topic", "Untitled"),
-        #     outline=request.outline.get("outline", []),
-        #     summary_topic=request.outline.get("summary_topic", "Summary")
-        # )
-        #
-        # return ContentResponse(
-        #     status="success",
-        #     content=content_result, # 假设 content_result 是内容
-        #     error=None
-        # )
+        # [CTO 修复] 检查 content_generator 的 V1 服务是否返回了回退数据
+        # (generate_ppt_data_v1 在失败时不会抛出异常, 而是返回回退数据)
+        if not slides_data or slides_data[0].get("title", "").endswith("(回退数据)"):
+             return ContentResponse(
+                status="error", 
+                content={}, 
+                error="内容生成失败 (可能由LLM API引起)"
+            )
+            
+        # [CTO 修复] 构造 Node 2 的标准输出
+        # 这与 worker/tasks.py 中 Node 2 的输出结构一致
+        content_result = {
+            "title": main_topic, # 将标题也传递下去
+            "slides_data": slides_data # 传递幻灯片列表
+        }
+            
+        # [CTO 修复] 返回成功响应，'content' 键包含 *完整的* 幻灯片数据
+        # 以便前端可以解析它，并为 Node 3 (export) 做准备。
+        return ContentResponse(
+            status="success",
+            content=content_result, # <--- 传递这个字典
+            error=None
+        )
         
     except Exception as e:
         logger.error(f"sync_generate_content 失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @router.post("/generation/export", response_model=TaskResponse)
 def async_export_ppt(request: ExportRequest):

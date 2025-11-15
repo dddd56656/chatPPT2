@@ -18,7 +18,7 @@ import axios from 'axios';
 // [CTO 修复 P1] baseURL 设置为 '' 来启用 Vite 代理
 const apiClient = axios.create({
   baseURL: '', // 之前是: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-  timeout: 10000,
+  timeout: 60000,
 });
 
 // 请求拦截器 (日志)
