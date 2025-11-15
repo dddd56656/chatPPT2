@@ -8,7 +8,7 @@ echo 2. 启动后端API服务器...
 start "Backend API" cmd /k "cd backend && uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
 
 echo 3. 启动Celery Worker...
-start "Celery Worker" cmd /k "cd backend && uv run celery -A app.worker.tasks worker --loglevel=info"
+start "Celery Worker" cmd /k "cd backend && uv run celery -A app.worker.tasks worker --loglevel=info --pool=solo"
 
 echo 所有服务启动完成！
 echo 前端: http://localhost:3001

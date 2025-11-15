@@ -10,7 +10,7 @@ export default defineConfig({
       // 匹配所有以 /api 开头的请求
       // 例如 /api/v1/tasks -> http://localhost:8000/api/v1/tasks
       '/api': {
-        target: 'http://localhost:8000', // 后端 API 的基础 URL
+        target: 'http://127.0.0.1:8000', // 后端 API 的基础 URL
         changeOrigin: true, // 更改请求头的 Origin 字段
       }
     }

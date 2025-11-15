@@ -25,8 +25,11 @@ app.add_middleware(
     CORSMiddleware,
     # 仅允许来自指定的前端地址
     allow_origins=[
-        "http://localhost:3001",  # 假设的前端开发服务器
-        "http://127.0.0.1:3001"
+        "http://localhost:5173",  # 假设的前端开发服务器
+        "http://127.0.0.1:5173",
+                # --- 本地开发 (允许 /docs 访问) ---
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
     ],
     allow_credentials=True,
     # 允许所有标准和非标准的HTTP方法
