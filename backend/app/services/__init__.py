@@ -7,9 +7,9 @@ from .exporter import PPTExporter, exporter_service
 
 __all__ = [
     "OutlineGenerator",
-    "create_outline_generator", 
+    "create_outline_generator",
     "ContentGeneratorV1",
     "TemplateEngine",
     "PPTExporter",
-    "exporter_service"
+    "exporter_service",
 ]

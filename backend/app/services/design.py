@@ -50,7 +50,7 @@ class TemplateEngine:
     ):
         """
         初始化模板引擎。
-        
+
         Args:
             exporter (PPTExporter): 依赖注入的导出器实例。
             template_path (str): 相对于项目根目录的模板路径。
@@ -65,7 +65,7 @@ class TemplateEngine:
     ) -> Dict[str, Any]:
         """
         [Node 3 调用] 使用模板创建PPT并进行内容修改。
-        
+
         CTO注：这是 `tasks.export_ppt_task` 调用的核心方法。
         """
         prs = self._load_resource()
@@ -120,8 +120,10 @@ class TemplateEngine:
                 return layout
 
         # 2. 回退到索引查找 (Plan B)
-        fallback_index = self.LAYOUT_INDICES.get(layout_key, 1) # 默认回退到索引 1 (如果key错误)
-        logger.warning(f"布局 '{target_name}' (Key: '{layout_key}') 未在模板中找到，回退使用索引 {fallback_index}")
+        fallback_index = self.LAYOUT_INDICES.get(layout_key, 1)  # 默认回退到索引 1 (如果key错误)
+        logger.warning(
+            f"布局 '{target_name}' (Key: '{layout_key}') 未在模板中找到，回退使用索引 {fallback_index}"
+        )
 
         if fallback_index < len(prs.slide_layouts):
             return prs.slide_layouts[fallback_index]
@@ -138,7 +140,14 @@ class TemplateEngine:
             # 过滤掉所有标题、图片、页码、表格相关的占位符
             if not any(
                 keyword in name
-                for keyword in ["Title", "Picture", "Slide Number", "Table", "Header", "Footer"]
+                for keyword in [
+                    "Title",
+                    "Picture",
+                    "Slide Number",
+                    "Table",
+                    "Header",
+                    "Footer",
+                ]
             ):
                 body_placeholders.append(p)
 
@@ -182,9 +191,7 @@ class TemplateEngine:
         if body_placeholders:
             self._set_placeholder_content(body_placeholders[0], content)
         else:
-            logger.warning(
-                f"幻灯片 '{title}' 的布局 ({layout.name}) 缺少可用内容占位符。"
-            )
+            logger.warning(f"幻灯片 '{title}' 的布局 ({layout.name}) 缺少可用内容占位符。")
 
     def _create_two_column_slide(
         self, prs: Presentation, title: str, left_content: Any, right_content: Any

@@ -5,15 +5,13 @@ FastAPI应用主入口文件 - 初始化应用实例和路由配置
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
+
 # CTO注：这里的 'router' 来自 app/routers/__init__.py
 # 它聚合了 tasks.py 和 generation.py
 from app.routers import router
 
 # 创建FastAPI应用实例
-app = FastAPI(
-    title=settings.app_name,
-    debug=settings.debug
-)
+app = FastAPI(title=settings.app_name, debug=settings.debug)
 
 # --- [CTO 修复与注释] ---
 # 修复：强化CORS（跨域资源共享）策略。
@@ -27,7 +25,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",  # 假设的前端开发服务器
         "http://127.0.0.1:5173",
-                # --- 本地开发 (允许 /docs 访问) ---
+        # --- 本地开发 (允许 /docs 访问) ---
         "http://localhost:8000",
         "http://127.0.0.1:8000",
     ],

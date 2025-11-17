@@ -13,7 +13,7 @@ import logging
 from app.worker.tasks import (
     generate_outline_conversational_task,
     generate_content_conversational_task,
-    export_ppt_task
+    export_ppt_task,
 )
 
 # 2. 导入数据合约 (Schemas)
@@ -22,7 +22,7 @@ from app.schemas.task import (
     ConversationalContentRequest,
     ExportRequest,
     TaskResponse,
-    TaskStatus
+    TaskStatus,
 )
 
 router = APIRouter()
@@ -33,23 +33,19 @@ logger = logging.getLogger(__name__)
 def async_generate_outline_conversational(request: ConversationalOutlineRequest):
     """
     [V2 异步节点 1]
-    
+
     接收聊天历史，提交 *异步* 大纲生成任务。
     立即返回 TaskID 供前端轮询。
     """
     try:
         if not request.history:
             raise HTTPException(status_code=422, detail="'history' 不能为空")
-            
+
         # 1. 提交给 Celery (非阻塞)
         task = generate_outline_conversational_task.delay(request.history)
-        
+
         # 2. 立即返回 Task ID
-        return TaskResponse(
-            task_id=task.id,
-            status=TaskStatus.PENDING,
-            result=None
-        )
+        return TaskResponse(task_id=task.id, status=TaskStatus.PENDING, result=None)
     except Exception as e:
         logger.error(f"V2 异步大纲任务提交失败: {e}", exc_info=True)
         raise HTTPException(status_code=503, detail=f"任务Broker连接失败: {str(e)}")
@@ -59,23 +55,21 @@ def async_generate_outline_conversational(request: ConversationalOutlineRequest)
 def async_generate_content_conversational(request: ConversationalContentRequest):
     """
     [V2 异步节点 2]
-    
+
     接收聊天历史和当前内容，提交 *异步* 内容修改任务。
     立即返回 TaskID 供前端轮询。
     """
     try:
         if not request.history:
             raise HTTPException(status_code=422, detail="'history' 不能为空")
-        
+
         # 1. 提交给 Celery (非阻塞)
-        task = generate_content_conversational_task.delay(request.history, request.current_slides)
-        
-        # 2. 立即返回 Task ID
-        return TaskResponse(
-            task_id=task.id,
-            status=TaskStatus.PENDING,
-            result=None
+        task = generate_content_conversational_task.delay(
+            request.history, request.current_slides
         )
+
+        # 2. 立即返回 Task ID
+        return TaskResponse(task_id=task.id, status=TaskStatus.PENDING, result=None)
     except Exception as e:
         logger.error(f"V2 异步内容任务提交失败: {e}", exc_info=True)
         raise HTTPException(status_code=503, detail=f"任务Broker连接失败: {str(e)}")
@@ -101,4 +95,3 @@ def async_export_ppt(request: ExportRequest):
         # (这很可能是 Broker 连接错误)
         logger.error(f"V2 异步导出任务提交失败: {e}", exc_info=True)
         raise HTTPException(status_code=503, detail=f"任务Broker连接失败: {str(e)}")
-
