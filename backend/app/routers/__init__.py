@@ -20,4 +20,4 @@ router = APIRouter()
 router.include_router(tasks.router, tags=["Async Tasks (Workflow)"])
 
 # 包含同步(聊天式)生成路由
-router.include_router(generation.router, tags=["Sync Generation (Chat)"])
+router.include_router(generation.router, tags=["Conversational Generation (Async)"])

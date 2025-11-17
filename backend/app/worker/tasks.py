@@ -242,3 +242,46 @@ def generate_ppt_task(self: Task, user_prompt: str):
 def health_check_task():
     """健康检查任务"""
     return {"status": "healthy", "service": "chatppt-worker"}
+
+# --- [V2 新增] 节点 1 - 对话式大纲 ---
+@celery_app.task(name="chatppt.generate_outline_conversational")
+def generate_outline_conversational_task(history: list) -> dict:
+    """
+    [V2 异步] 对话式大纲生成任务
+    """
+    if not outline_generator:
+        logger.error("V2 任务失败: Outline Generator 未初始化")
+        return {"status": "error", "error": "Outline Service not initialized"}
+        
+    try:
+        # 调用服务层的对话方法
+        result = outline_generator.generate_outline_conversational(history)
+        if result.get("status") == "error":
+             raise Exception(result.get("error", "LLM generation failed"))
+        return result
+    except Exception as e:
+        logger.error(f"V2 异步大纲任务失败: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
+
+# --- [V2 新增] 节点 2 - 对话式内容 ---
+@celery_app.task(name="chatppt.generate_content_conversational")
+def generate_content_conversational_task(history: list, current_slides: list) -> dict:
+    """
+    [V2 异步] 对话式内容生成/修改任务
+    """
+    if not content_generator:
+        logger.error("V2 任务失败: Content Generator 未初始化")
+        return {"status": "error", "error": "Content Service not initialized"}
+        
+    try:
+        # 调用服务层的对话方法 (返回 slides_data 列表)
+        slides_data = content_generator.generate_content_conversational(history, current_slides)
+        
+        # 包装为标准返回格式 (注意: 这里的 'content' 是为前端的 ContentResponse 准备的)
+        return {
+            "status": "success",
+            "slides_data": slides_data
+        }
+    except Exception as e:
+        logger.error(f"V2 异步内容任务失败: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}

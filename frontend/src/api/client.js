@@ -43,10 +43,10 @@ apiClient.interceptors.response.use(
 // --- 用于旧的 `/tasks` 路由 (现在仅用于轮询) ---
 export const taskAPI = {
   // [CTO 修复 P1] 路径更新为相对路径
-  getTaskStatus: (taskId) => 
+  getTaskStatus: (taskId) =>
     apiClient.get(`/api/v1/tasks/${taskId}`),
-  
-  downloadPPT: (taskId) => 
+
+  downloadPPT: (taskId) =>
     apiClient.get(`/api/v1/tasks/${taskId}/file`, { responseType: 'blob' }),
 };
 
@@ -59,14 +59,24 @@ export const generationAPI = {
    */
   generateOutline: (userPrompt) =>
     apiClient.post('/api/v1/generation/outline', { user_prompt: userPrompt }),
-
+  /**
+     * [V2 修复] 步骤 1 (新的, V2): 
+     * 支持对话式生成大纲
+     *
+     * @param {Array} chatHistory - 完整的聊天记录 (例如: [{role: 'user', content: '...'}])
+     */
+  generateOutline_conversational: (chatHistory) =>
+    // [V2 修复] 调用新的后端端点
+    apiClient.post('/api/v1/generation/outline_conversational', {
+      history: chatHistory // 将整个聊天记录数组作为 'history' 键发送
+    }),
   /**
    * 步骤 2: (同步) 生成内容
    */
   generateContent: (userPrompt, outlineData) =>
-    apiClient.post('/api/v1/generation/content', { 
+    apiClient.post('/api/v1/generation/content', {
       user_prompt: userPrompt,
-      outline: outlineData 
+      outline: outlineData
     }),
 
   /**

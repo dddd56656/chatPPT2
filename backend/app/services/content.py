@@ -54,11 +54,25 @@ SYSTEM_PROMPT_BASE = """[系统指令]
 # --- 3. 内容生成器服务 (V1 架构) ---
 
 class ContentGeneratorV1:
+    # [V2 新增] 对话式内容修改的系统指令
+    CONVERSATIONAL_CONTENT_SYSTEM_PROMPT = """[系统指令]
+你是PPT内容编辑专家。你的任务是根据用户的修改请求，更新一个已存在的PPT幻灯片数据（JSON格式）。
+你将收到：
+1. `current_slides_json`: 当前所有幻灯片的完整JSON。
+2. `history`: 包含用户最新修改请求的对话历史。
+
+你的唯一目标是：
+1. 理解用户的修改请求（例如 "把第二张幻灯片的标题改成..." 或 "为第三张幻灯片增加一个要点..."）。
+2. 将修改应用到 `current_slides_json`。
+3. 严格按照 `SlideDeckModel` Pydantic 格式，返回 *修改后* 的 *完整* 幻灯片 JSON 列表。
+"""
     """
     内容生成服务 (V1 架构)。
     Python 负责编排大纲 (Oulline)，LLM 负责逐页填充内容。
     """
 
+    # [V2 新增] 对话式内容生成链
+    self.conversational_content_chain = None
     def __init__(self, template_engine: TemplateEngine):
         """
         初始化内容生成器。
@@ -104,6 +118,17 @@ class ContentGeneratorV1:
                     ("user", "为演示文稿 '{main_topic}' 生成总结和展望的文本内容。"),
                 ]
             ) | self.llm.with_structured_output(ContentSlideModel)
+            # [V2 新增] 4. 对话式内容生成链
+            self.conversational_content_chain = ChatPromptTemplate.from_messages([
+                ("system", self.CONVERSATIONAL_CONTENT_SYSTEM_PROMPT),
+                ("user", "当前幻灯片JSON如下：
+{current_slides_json}
+
+对话历史如下：
+{history}
+
+请根据最新请求，返回完整的、修改后的幻灯片JSON。")
+            ]) | self.llm.with_structured_output(SlideDeckModel)
         except Exception as e:
             logger.error(f"初始化LangChain失败: {e}")
             raise
@@ -181,6 +206,17 @@ class ContentGeneratorV1:
             logger.debug(f"最终幻灯片数据: {slides_data}")
             return slides_data
 
+            # [V2 新增] 4. 对话式内容生成链
+            self.conversational_content_chain = ChatPromptTemplate.from_messages([
+                ("system", self.CONVERSATIONAL_CONTENT_SYSTEM_PROMPT),
+                ("user", "当前幻灯片JSON如下：
+{current_slides_json}
+
+对话历史如下：
+{history}
+
+请根据最新请求，返回完整的、修改后的幻灯片JSON。")
+            ]) | self.llm.with_structured_output(SlideDeckModel)
         except Exception as e:
             # [CTO Note - P3 修复]: 仅在启动阶段失败时使用回退
             logger.error(f"V1 架构启动失败 (例如标题页生成失败): {e}")
@@ -203,6 +239,38 @@ class ContentGeneratorV1:
             title=output_title, slides_data=slides_data
         )
 
+    def generate_content_conversational(self, history: List[Dict[str, str]], current_slides: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        [V2 新增] 基于对话历史修改或生成内容。
+        """
+        logger.info("V2: 开始对话式内容生成...")
+        
+        try:
+            # 1. 转换历史格式
+            langchain_history = []
+            for msg in history:
+                if msg.get("role") != "system":
+                    langchain_history.append((msg.get("role"), msg.get("content")))
+            
+            # 2. 将当前幻灯片列表转为JSON字符串
+            current_slides_json = str(current_slides) # 简单转为字符串
+            
+            # 3. 调用新的V2内容链
+            response_model = self.conversational_content_chain.invoke({
+                "history": langchain_history,
+                "current_slides_json": current_slides_json
+            })
+            
+            # 4. 返回 Pydantic 模型中的幻灯片列表 (转换为 dict)
+            slides_data = [slide.model_dump() for slide in response_model.slides]
+            logger.info(f"V2: 对话式内容生成完成，共 {len(slides_data)} 张幻灯片。")
+            return slides_data
+            
+        except Exception as e:
+            logger.error(f"V2: 对话式内容生成失败: {e}")
+            # 在失败时返回 *原始* 幻灯片，防止数据丢失
+            return current_slides
+
     def get_fallback_data(self, topic: str) -> List[Dict[str, Any]]:
         """[P3 修复] 提供动态标题的回退数据。"""
         return [
@@ -220,3 +288,20 @@ class ContentGeneratorV1:
                 ],
             },
         ]
+
+from pydantic import conlist
+
+# [V2 新增] 用于包装幻灯片列表的 Pydantic 模型，确保 LLM 输出格式
+class SlideDataModel(BaseModel):
+    """定义单个幻灯片的灵活结构"""
+    slide_type: str = Field(..., description="幻灯片类型 (title, content, two_column)")
+    title: str = Field(..., description="幻灯片标题")
+    subtitle: Optional[str] = Field(None, description="副标题 (仅用于 title)")
+    content: Optional[List[str]] = Field(None, description="内容 (仅用于 content)")
+    left_content: Optional[List[str]] = Field(None, description="左栏内容 (仅用于 two_column)")
+    right_content: Optional[List[str]] = Field(None, description="右栏内容 (仅用于 two_column)")
+
+class SlideDeckModel(BaseModel):
+    """[V2 新增] LLM 必须返回一个包含所有幻灯片的列表"""
+    slides: List[SlideDataModel] = Field(..., description="演示文稿中所有幻灯片的完整列表")
+

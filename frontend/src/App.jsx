@@ -47,14 +47,14 @@ function App() {
   const [finalOutline, setFinalOutline] = useState(null); // 存储最终确认的大纲
 
   // [CTO注]：我们只在最后一步才需要 useTask
-  const { 
-    taskId, 
-    status, 
-    error: exportError, 
-    result, 
+  const {
+    taskId,
+    status,
+    error: exportError,
+    result,
     startPolling, // <--- [CTO 修复] 使用新的 `startPolling`
-    downloadPPT, 
-    resetTask 
+    downloadPPT,
+    resetTask
   } = useTask();
 
   // --- 辅助函数：安全地解析最后一条AI消息 ---
@@ -62,7 +62,7 @@ function App() {
     // 从后往前找，找到最后一条 'assistant' 的消息
     const lastAiMsg = [...history].reverse().find(m => m.role === 'assistant');
     if (!lastAiMsg) throw new Error("在历史记录中未找到AI响应。");
-    
+
     try {
       // 尝试将内容解析为 JSON
       return JSON.parse(lastAiMsg.content);
@@ -83,14 +83,15 @@ function App() {
     try {
       // [CTO注]：我们只发送 *当前* 的提示词。
       // (一个更高级的实现可能会发送整个 newHistory)
-      const response = await generationAPI.generateOutline(userInput);
-      
+      // const response = await generationAPI.generateOutline(userInput);
+      // [V2 修复]：我们现在发送 *整个* newHistory 来实现对话式修改
+      const response = await generationAPI.generateOutline_conversational(newHistory);
       if (response.data.status === 'error') {
         throw new Error(response.data.error || "大纲生成失败");
       }
-      
+
       // AI的回复是一个JSON对象，我们将其格式化后显示
-      const aiResponse = JSON.stringify(response.data.outline, null, 2);
+      const aiResponse = JSON.stringify(response.data, null, 2);
       setChatHistory([...newHistory, { role: 'assistant', content: aiResponse }]);
 
     } catch (err) {
@@ -112,11 +113,11 @@ function App() {
     try {
       // [CTO注]：我们发送 *最终确认的大纲* 和 *当前提示词*
       const response = await generationAPI.generateContent(userInput, finalOutline);
-      
+
       if (response.data.status === 'error') {
         throw new Error(response.data.error || "内容生成失败");
       }
-      
+
       const aiResponse = JSON.stringify(response.data.content, null, 2);
       setChatHistory([...newHistory, { role: 'assistant', content: aiResponse }]);
 
@@ -135,7 +136,7 @@ function App() {
       // 1. 解析最后一条AI消息以获取大纲
       const outlineJson = getJsonFromLastMessage(chatHistory);
       setFinalOutline(outlineJson); // 存储
-      
+
       // 2. 转换到内容阶段
       setPhase(PHASE_CONTENT);
       setChatHistory([CONTENT_SYSTEM_MSG]); // 重置聊天
@@ -154,20 +155,20 @@ function App() {
     try {
       // 1. 解析最后一条AI消息以获取最终内容
       const contentJson = getJsonFromLastMessage(chatHistory);
-      
+
       // 2. 提交异步导出任务
       const response = await generationAPI.exportPpt(contentJson);
-      
+
       if (!response.data || !response.data.task_id) {
         throw new Error("启动导出任务失败");
       }
-      
+
       // 3. [CTO 关键]：使用返回的 task_id 启动轮询器
       startPolling(response.data.task_id);
-      
+
       // 4. 转换到导出阶段
       setPhase(PHASE_EXPORTING);
-      
+
     } catch (e) {
       setError(e.message);
       setChatHistory([...chatHistory, { role: 'assistant', content: `导出失败: ${e.message}` }]);
@@ -237,11 +238,11 @@ function App() {
         <h1>ChatPPT (对话模式)</h1>
         <p>AI驱动的智能演示文稿生成器</p>
       </header>
-      
+
       <main className="app-main">
         {renderPhase()}
       </main>
-      
+
       <footer className="app-footer">
         <p>© 2024 ChatPPT - 基于FastAPI + React构建</p>
       </footer>

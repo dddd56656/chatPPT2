@@ -52,7 +52,12 @@ OUTLINE_SYSTEM_PROMPT = """[系统指令]
 
 你必须严格按照 Pydantic JSON 格式输出。
 """
-
+# [V2 修复 - 新增] 专用于V2对话式修改的新指令
+OUTLINE_CONVERSATIONAL_PROMPT = """[系统指令]
+你是一名PPT结构设计专家。
+- 如果用户是第一次发言 (历史记录中只有一条 'user' 消息)，请根据用户需求生成合理的PPT大纲结构，并严格按照 Pydantic JSON 格式输出。
+- 如果用户的历史记录中包含一个AI生成的JSON大纲和用户的修改意见 (例如：'请修改第二点')，请根据用户的修改意见更新大纲，并再次严格按照 Pydantic JSON 格式输出。
+- 你的回复必须是纯粹的Pydantic JSON格式，绝对不能包含任何解释性文字或道歉。"""
 # --- 3. 大纲生成器服务 ---
 
 class OutlineGenerator:
@@ -82,7 +87,12 @@ class OutlineGenerator:
                 ("system", OUTLINE_SYSTEM_PROMPT),
                 ("user", "根据以下用户需求生成PPT大纲：\n{user_prompt}")
             ]) | self.llm.with_structured_output(OutlineModel)
-            
+            # [V2 修复 - 新增] 支持对话式修改的V2链
+            self.conversational_chain = ChatPromptTemplate.from_messages([
+                ("system", OUTLINE_CONVERSATIONAL_PROMPT),
+                # "history" 占位符将接收一个消息列表 (e.g., [ ('user', '...'), ('assistant', '...') ])
+                ("placeholder", "{history}") 
+            ]) | self.llm.with_structured_output(OutlineModel) # 输出格式保持不变           
         except Exception as e:
             logger.error(f"初始化大纲生成器失败: {e}")
             raise
@@ -119,7 +129,50 @@ class OutlineGenerator:
                 "error": str(e),
                 "fallback_data": self.get_fallback_outline(user_prompt)
             }
-    
+# [V2 修复 - 新增]
+    def generate_outline_conversational(self, history: List[Dict[str, str]]) -> Dict[str, Any]:
+        """
+        [Node 1: V2 - 新] 根据完整的聊天历史生成或修改大纲
+        
+        CTO注：这是 V2 聊天界面 (App.jsx) 调用的新核心方法。
+        它接收由前端管理的状态（聊天记录）。
+        """
+        logger.info(f"开始对话式大纲生成 (V2)，历史消息数：{len(history)}")
+        
+        try:
+            # 1. 转换 history 格式
+            # 前端 `client.js` 发送 [{'role': 'user', 'content': '...'}]
+            # LangChain 的 placeholder 期望 [('user', '...'), ('assistant', '...')]
+            
+            langchain_history = []
+            for msg in history:
+                # 过滤掉 'system' 消息, 因为我们的 V2 prompt 已经硬编码了系统指令
+                if msg.get("role") != "system":
+                    langchain_history.append((msg.get("role"), msg.get("content")))
+
+            # 2. 调用新的V2对话链
+            outline_model = self.conversational_chain.invoke({"history": langchain_history})
+            logger.debug(f"对话式大纲 (V2) LLM输出: {outline_model}")
+            
+            # 3. 返回与 V1 'generate_outline' 相同的成功数据结构
+            logger.info(f"对话式大纲 (V2) 生成/修改成功：主主题 '{outline_model.main_topic}'")
+            
+            return {
+                "main_topic": outline_model.main_topic,
+                "outline": outline_model.outline,
+                "summary_topic": outline_model.summary_topic,
+                "status": "success"
+            }
+            
+        except Exception as e:
+            logger.error(f"对话式大纲 (V2) 生成/修改失败: {e}")
+            # 4. 返回与 V1 'generate_outline' 相同的失败数据结构
+            return {
+                "status": "error",
+                "error": str(e),
+                # 注意：这里我们无法调用 get_fallback_outline，因为它依赖单个 user_prompt
+                # 仅返回错误信息更合适
+            }    
     def generate_complete_ppt(self, user_prompt: str, template_engine: TemplateEngine) -> Dict[str, Any]:
         """
         [Node 1+2+3: 错误] 完整的PPT生成流程 (单体方法)

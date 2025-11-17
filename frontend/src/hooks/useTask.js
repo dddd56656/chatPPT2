@@ -30,32 +30,6 @@ export const useTask = () => {
   const [error, setError] = useState(null);         // 错误信息
   const [result, setResult] = useState(null);       // 成功时的结果数据
 
-  // --- [CTO 修复 P1] 行为 1: 重命名 (用于旧的单一流程) ---
-  const createBatchTask = useCallback(async (userPrompt) => {
-    try {
-      setError(null);
-      setStatus(TaskStatus.PENDING); // 立即进入等待状态
-      
-      // [CTO 修复]：taskAPI 现在没有 createTask 了，
-      // 这个函数现在是为旧流程准备的，暂时保留，但新的聊天流程不使用它。
-      // const response = await taskAPI.createTask(userPrompt); 
-      // const taskData = response.data;
-      
-      // 2. 存储来自后端的任务ID
-      // setTaskId(taskData.task_id);
-      // setStatus(taskData.status);
-      
-      // return taskData.task_id;
-      console.warn("createBatchTask is deprecated and not implemented in chat flow.");
-      return null;
-    } catch (err) {
-      const errorMsg = err.response?.data?.detail || err.message;
-      setError(errorMsg);
-      setStatus(TaskStatus.FAILURE);
-      throw new Error(errorMsg); // 抛出错误，以便 App.jsx 可以捕获它
-    }
-  }, []); // useCallback 确保此函数在重渲染时保持稳定
-
   // --- [CTO 扩展 P2] 行为 1B: 启动轮询 ---
   /**
    * [新] 手动启动轮询器。
@@ -150,7 +124,6 @@ export const useTask = () => {
     error,
     result,
     // [CTO 修复 P1 & P2] 导出新函数
-    createBatchTask, // 旧函数
     startPolling,    // 新函数
     pollTaskStatus,
     downloadPPT,
