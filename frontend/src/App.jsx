@@ -1,16 +1,18 @@
 /**
  * [CTO 注释与修复]
- * * 文件名: App.jsx (V2 纯净版)
+ * * 文件名: App.jsx (V2 纯净版 - V6 修复)
  * * 职责: V2 聊天状态机 (全异步)。
  *
- * [修复]:
+ * [V6 修复]:
  * 1.  引入 `currentSlides` 状态：这是“内容阶段”的单一数据源。
  * 2.  `handleOutlineConfirm`: 现在负责将 `result.outline` 转换为
  * `initialSlides`，并调用 `setCurrentSlides` 来初始化内容阶段。
- * 3.  `handleContentSend`: 现在发送 `currentSlides` 状态。
+ * [V6] 它 *不再* 将这个骨架JSON显示在聊天框中。
+ * 3.  `handleContentSend`: 现在发送 *干净的* `history` (仅含系统提示和用户输入)
+ * 和 `currentSlides` 状态 (包含骨架/内容)。
  * 4.  `useEffect` (on Task SUCCESS): 在 `PHASE_CONTENT` 阶段，
- * 它现在会调用 `setCurrentSlides(result.slides_data)`，
- * 从而在每次AI响应后更新内存中的 `slides_data`。
+ * 它现在会调用 `setCurrentSlides(result.slides_data)` 来更新 "记忆"，
+ * 并只在聊天框中显示 *最新的* 用户消息和AI响应。
  * 5.  `handleExport`: 现在从 `currentSlides` 状态获取最终数据。
  */
 import { useState, useCallback, useEffect } from 'react';
@@ -31,10 +33,10 @@ const OUTLINE_SYSTEM_MSG = {
   content: '你好！我是 ChatPPT (V2 异步模式)。\n请输入您想要生成的主题，我将为您创建一份大纲。'
 };
 
-// [CTO 语法修复 P2]：将外部 ' 替换为 "，并转义内部的 "
+// [CTO V6 修复] 简化消息。骨架不应显示在聊天中。
 const CONTENT_SYSTEM_MSG = {
   role: 'assistant',
-  content: "大纲已确认！这是根据大纲生成的初始幻灯片内容 (JSON 格式)。\n\n您可以对话式地修改它 (例如：\"更改第二张幻灯片的标题为 '新标题'\")，或直接点击 \"确认内容\" 进行导出。"
+  content: "大纲已确认！\n\n您现在可以对话式地修改内容 (例如：\"为幻灯片2的左栏添加要点'xxx'\")，或者输入 \"生成所有内容\" 来让AI填充所有幻灯片。"
 };
 
 function App() {
@@ -69,12 +71,19 @@ function App() {
         // [V2 节点 1 成功]: 我们收到了大纲
         const outlineJson = JSON.stringify(result.outline, null, 2);
         setChatHistory((prev) => [...prev, { role: 'assistant', content: outlineJson }]);
-
+        
       } else if (phase === PHASE_CONTENT && result.slides_data) {
         // [V2 节点 2 成功]: 我们收到了内容
         const contentJson = JSON.stringify(result.slides_data, null, 2);
-        setChatHistory((prev) => [...prev, { role: 'assistant', content: contentJson }]);
-
+        
+        // [CTO V6 修复]：用AI返回的新内容替换旧的聊天记录，
+        // 这样 history 就不会无限增长。
+        setChatHistory((prev) => [
+            // 保留上一条的用户消息 (prev[prev.length - 1])
+            prev[prev.length - 1], 
+            { role: 'assistant', content: contentJson } // 显示新内容
+        ]);
+        
         // [CTO 关键修复]：更新 currentSlides 状态以实现 "记忆"
         setCurrentSlides(result.slides_data);
 
@@ -84,7 +93,7 @@ function App() {
 
       setIsLoading(false);
     }
-
+    
     // 4. 处理任务失败
     if (status === TaskStatus.FAILURE) {
       const errorMsg = taskError || "任务失败";
@@ -106,7 +115,7 @@ function App() {
       // [V2 节点 1]：只提交任务，不等待结果
       const response = await generationAPI.generateOutline_conversational(newHistory);
       startPolling(response.data.task_id); // 启动轮询
-
+      
     } catch (err) { // API 提交失败
       const errorMsg = err.response?.data?.detail || err.message || '大纲请求提交失败';
       setError(errorMsg);
@@ -119,23 +128,33 @@ function App() {
   const handleContentSend = async (userInput) => {
     setIsLoading(true);
     setError(null);
-    const newHistory = [...chatHistory, { role: 'user', content: userInput }];
-    setChatHistory(newHistory);
+
+    // [CTO V6 修复]：创建一个 *干净的* history。
+    // 我们只发送系统提示和用户的最新输入。
+    // `currentSlides`（骨架）将通过 `generationAPI` 的第二个参数单独传递。
+    const cleanHistory = [
+      { role: 'system', content: CONTENT_SYSTEM_MSG.content },
+      { role: 'user', content: userInput }
+    ];
+
+    // [CTO V6 修复]：只在 UI 上显示用户的输入，
+    // AI 的响应将由 useEffect 在成功时添加。
+    setChatHistory((prev) => [...prev, { role: 'user', content: userInput }]);
 
     try {
-      // [CTO 修复 P1]：现在从 `currentSlides` 状态获取数据
       if (currentSlides.length === 0) {
         throw new Error("内部错误：currentSlides 状态为空。");
       }
 
-      // [V2 节点 2]：发送聊天记录和 *当前* 的幻灯片状态
-      const response = await generationAPI.generateContent_conversational(newHistory, currentSlides);
+      // [V2 节点 2]：发送 *干净的* 历史记录和 *当前* 的幻灯片状态
+      const response = await generationAPI.generateContent_conversational(cleanHistory, currentSlides);
       startPolling(response.data.task_id); // 启动轮询
 
     } catch (err) {
       const errorMsg = err.response?.data?.detail || err.message || '内容请求提交失败';
       setError(errorMsg);
-      setChatHistory([...newHistory, { role: 'assistant', content: `错误: ${errorMsg}` }]);
+      // [CTO V6 修复]：使用 (prev) => ... 来获取正确的 'prev' 状态
+      setChatHistory((prev) => [...prev, { role: 'assistant', content: `错误: ${errorMsg}` }]);
       setIsLoading(false);
     }
   };
@@ -150,9 +169,8 @@ function App() {
       setChatHistory([...chatHistory, { role: 'assistant', content: errorMsg }]);
       return;
     }
-
-    // [CTO 关键修复]：将 V2 Outline 转换为 V2 SlidesData 结构
-    // 这是 "内容阶段" 的初始状态 (v1)。
+    
+    // [CTO 关键修复 V3]：创建 *明确的* 骨架
     const initialSlides = [
       { 
         slide_type: "title", 
@@ -182,10 +200,11 @@ function App() {
     setError(null);
     resetTask(); // 3. 重置 useTask 以准备下一次轮询
 
-    // 4. 重置聊天记录，并显示系统消息和 *初始幻灯片*
+    // [CTO V6 修复]：重置聊天记录，但 *不* 显示骨架 JSON。
+    // 骨架 JSON 现在只存在于 `currentSlides` 状态中。
     setChatHistory([
-      CONTENT_SYSTEM_MSG,
-      { role: 'assistant', content: JSON.stringify(initialSlides, null, 2) }
+      CONTENT_SYSTEM_MSG
+      // { role: 'assistant', content: JSON.stringify(initialSlides, null, 2) } // <-- [V6] 移除
     ]);
   };
 
@@ -193,7 +212,7 @@ function App() {
   const handleExport = async () => {
     setIsLoading(true);
     setError(null);
-
+    
     try {
       // [CTO 修复 P1]：从 `currentSlides` 状态获取最终数据
       const finalSlides = currentSlides;
@@ -206,7 +225,7 @@ function App() {
         title: finalSlides.find(s => s.slide_type === 'title')?.title || "演示文稿",
         slides_data: finalSlides
       };
-
+      
       const response = await generationAPI.exportPpt(contentJson);
       if (!response.data || !response.data.task_id) {
         throw new Error("启动导出任务失败");
@@ -214,12 +233,12 @@ function App() {
 
       resetTask();
       startPolling(response.data.task_id);
-      setPhase(PHASE_EXPORTING);
+      setPhase(PHASE_EXPORTING); 
 
     } catch (e) {
       const errorMsg = e.message || "导出失败";
       setError(errorMsg);
-      setChatHistory([...chatHistory, { role: 'assistant', content: `导出失败: ${errorMsg}` }]);
+      setChatHistory([...chatHistory, { role: 'assistant', content: `导出失败: ${e.message}` }]);
     } finally {
       setIsLoading(false);
     }
