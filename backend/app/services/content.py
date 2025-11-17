@@ -17,11 +17,9 @@ from pydantic import BaseModel, Field
 # --- 日志配置 ---
 logger = logging.getLogger(__name__)
 
-
-# --- V2 Pydantic Schemas (整体) ---
+# --- 2. V2 Pydantic Schemas (整体) ---
 class SlideDataModel(BaseModel):
     """[V2] 定义单个幻灯片的灵活结构"""
-
     slide_type: str = Field(..., description="幻灯片类型 (title, content, two_column)")
     title: str = Field(..., description="幻灯片标题")
     subtitle: Optional[str] = Field(None, description="副标题 (仅用于 title)")
@@ -32,6 +30,9 @@ class SlideDataModel(BaseModel):
     right_content: Optional[List[str]] = Field(
         None, description="右栏内容 (仅用于 two_column)"
     )
+    # [CTO V3] 在 Pydantic 模型中允许存在 topic 字段 (允许前端传入)
+    left_topic: Optional[str] = Field(None, description="用于生成的左栏主题")
+    right_topic: Optional[str] = Field(None, description="用于生成的右栏主题")
 
 
 class SlideDeckModel(BaseModel):
@@ -44,15 +45,36 @@ class SlideDeckModel(BaseModel):
 
 # --- V2 系统指令 ---
 CONVERSATIONAL_CONTENT_SYSTEM_PROMPT = """[系统指令]
-你是PPT内容编辑专家。你的任务是根据用户的修改请求，更新一个已存在的PPT幻灯片数据（JSON格式）。
+你是PPT内容与结构编辑专家。你的任务是根据用户的请求，生成或修改一个PPT幻灯片数据（JSON格式）。
+
 你将收到：
 1. `current_slides_json`: 当前所有幻灯片的完整JSON。
-2. `history`: 包含用户最新修改请求的对话历史。
+2. `history`: 包含用户最新请求的对话历史。
 
-你的唯一目标是：
-1. 理解用户的修改请求（例如 "把第二张幻灯片的标题改成..." 或 "为第三张幻灯片增加一个要点..."）。
-2. 将修改应用到 `current_slides_json`。
-3. 严格按照 `SlideDeckModel` Pydantic 格式，返回 *修改后* 的 *完整* 幻灯片 JSON 列表。
+你的目标是执行以下两种操作之一：
+
+[操作 1: 内容生成 (填充)]
+- **触发条件**: 当用户的最新请求是通用的生成指令时 (例如："开始生成", "填充内容", "生成", "ok", "go")。
+- **你的任务**:
+    1.  遍历 `current_slides_json` 中的每一张幻灯片。
+    2.  **对于 `title` 幻灯片**: 保持原样。
+    3.  **对于 `content` 幻灯片**: 如果 `content` 字段为空 (例如 `[]`) 或是默认的 `["谢谢观看"]`，则根据 `title` 字段为其生成 3-5 个详细的要点 (bullet points)。
+    4.  **对于 `two_column` 幻灯片**,自动生成最合适的幻灯片的文本的数量，要求尽可能详细，并起到答疑解惑的作用:
+        a.  检查是否存在 `left_topic` 和 `right_topic` 字段。
+        b.  如果 `left_content` 字段为空 (`[]`)，你 *必须* 根据 `left_topic` 字段 (例如: "美国汉堡") 生成 3-5 个详细要点，并填充到 `left_content` 数组中。
+        c.  如果 `right_content` 字段为空 (`[]`)，你 *必须* 根据 `right_topic` 字段 (例如: "美国热狗") 生成 3-5 个详细要点，并填充到 `right_content` 数组中。
+        d.  生成内容后，你 *可以* 在返回的 JSON 中移除 `left_topic` 和 `right_topic` 字段。
+    5.  **不要**返回 `null`。必须生成真实的文本内容。
+    6.  返回 *填充内容后* 的 *完整* 幻灯片 JSON 列表。
+
+[操作 2: 内容修改 (编辑)]
+- **触发条件**: 当用户的最新请求是 *具体* 的修改指令时 (例如："把第二张幻灯片的标题改成...", "为第三张幻灯片增加一个要点...")。
+- **你的任务**:
+    1.  理解用户的 *具体* 修改请求。
+    2.  将该修改应用到 `current_slides_json`。
+    3.  返回 *修改后* 的 *完整* 幻灯片 JSON 列表。
+
+你必须严格按照 `SlideDeckModel` Pydantic 格式输出。
 """
 
 # --- 内容生成器服务 (V2 专注) ---

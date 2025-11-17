@@ -154,20 +154,24 @@ function App() {
     // [CTO 关键修复]：将 V2 Outline 转换为 V2 SlidesData 结构
     // 这是 "内容阶段" 的初始状态 (v1)。
     const initialSlides = [
-      {
-        slide_type: "title",
-        title: lastOutline.main_topic,
-        subtitle: lastOutline.summary_topic || ""
+      { 
+        slide_type: "title", 
+        title: lastOutline.main_topic, 
+        subtitle: lastOutline.summary_topic || "" 
       },
       ...lastOutline.outline.map((item) => ({
         slide_type: "two_column",
         title: item.sub_topic,
-        left_content: [item.topic1], // 默认为数组
-        right_content: [item.topic2] // 默认为数组
+        // [CTO V3] 添加明确的 *主题* 字段作为输入
+        left_topic: item.topic1, 
+        right_topic: item.topic2,
+        // [CTO V3] 将 *内容* 字段留空，以便 LLM 填充
+        left_content: [], 
+        right_content: [] 
       })),
-      {
-        slide_type: "content",
-        title: lastOutline.summary_topic,
+      { 
+        slide_type: "content", 
+        title: lastOutline.summary_topic, 
         content: ["谢谢观看"] // 添加一个默认的总结页
       }
     ];
