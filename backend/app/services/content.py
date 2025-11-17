@@ -12,15 +12,16 @@ import logging
 from typing import Dict, Any, List, Optional
 from langchain_deepseek import ChatDeepSeek
 from langchain_core.prompts import ChatPromptTemplate
-from pydantic import BaseModel, Field, ValidationError
-from langchain_core.exceptions import OutputParserException
+from pydantic import BaseModel, Field
 
 # --- 日志配置 ---
 logger = logging.getLogger(__name__)
 
+
 # --- V2 Pydantic Schemas (整体) ---
 class SlideDataModel(BaseModel):
     """[V2] 定义单个幻灯片的灵活结构"""
+
     slide_type: str = Field(..., description="幻灯片类型 (title, content, two_column)")
     title: str = Field(..., description="幻灯片标题")
     subtitle: Optional[str] = Field(None, description="副标题 (仅用于 title)")
@@ -35,9 +36,11 @@ class SlideDataModel(BaseModel):
 
 class SlideDeckModel(BaseModel):
     """[V2] LLM 必须返回一个包含所有幻灯片的列表"""
+
     slides: List[SlideDataModel] = Field(
         ..., description="演示文稿中所有幻灯片的完整列表"
     )
+
 
 # --- V2 系统指令 ---
 CONVERSATIONAL_CONTENT_SYSTEM_PROMPT = """[系统指令]
@@ -53,6 +56,7 @@ CONVERSATIONAL_CONTENT_SYSTEM_PROMPT = """[系统指令]
 """
 
 # --- 内容生成器服务 (V2 专注) ---
+
 
 class ContentGeneratorV1:
     """
@@ -74,15 +78,18 @@ class ContentGeneratorV1:
             self.llm = ChatDeepSeek(
                 model="deepseek-chat", temperature=0, api_key=self.api_key
             )
-            
+
             # --- V2 链 (整体) ---
             self.conversational_content_chain = ChatPromptTemplate.from_messages(
                 [
                     ("system", CONVERSATIONAL_CONTENT_SYSTEM_PROMPT),
-                    ("user", "当前幻灯片JSON如下：\n{current_slides_json}\n\n对话历史如下：\n{history}\n\n请根据最新请求，返回完整的、修改后的幻灯片JSON。"),
+                    (
+                        "user",
+                        "当前幻灯片JSON如下：\n{current_slides_json}\n\n对话历史如下：\n{history}\n\n请根据最新请求，返回完整的、修改后的幻灯片JSON。",
+                    ),
                 ]
             ) | self.llm.with_structured_output(SlideDeckModel)
-            
+
         except Exception as e:
             logger.error(f"初始化 ContentGenerator (LangChain) 失败: {e}")
             raise

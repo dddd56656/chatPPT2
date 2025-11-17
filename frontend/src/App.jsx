@@ -31,9 +31,10 @@ const OUTLINE_SYSTEM_MSG = {
   content: '你好！我是 ChatPPT (V2 异步模式)。\n请输入您想要生成的主题，我将为您创建一份大纲。'
 };
 
+// [CTO 语法修复 P2]：将外部 ' 替换为 "，并转义内部的 "
 const CONTENT_SYSTEM_MSG = {
   role: 'assistant',
-  content: '大纲已确认！这是根据大纲生成的初始幻灯片内容 (JSON 格式)。\n\n您可以对话式地修改它 (例如："更改第二张幻灯片的标题为 '新标题'")，或直接点击 "确认内容" 进行导出。'
+  content: "大纲已确认！这是根据大纲生成的初始幻灯片内容 (JSON 格式)。\n\n您可以对话式地修改它 (例如：\"更改第二张幻灯片的标题为 '新标题'\")，或直接点击 \"确认内容\" 进行导出。"
 };
 
 function App() {
@@ -68,12 +69,12 @@ function App() {
         // [V2 节点 1 成功]: 我们收到了大纲
         const outlineJson = JSON.stringify(result.outline, null, 2);
         setChatHistory((prev) => [...prev, { role: 'assistant', content: outlineJson }]);
-        
+
       } else if (phase === PHASE_CONTENT && result.slides_data) {
         // [V2 节点 2 成功]: 我们收到了内容
         const contentJson = JSON.stringify(result.slides_data, null, 2);
         setChatHistory((prev) => [...prev, { role: 'assistant', content: contentJson }]);
-        
+
         // [CTO 关键修复]：更新 currentSlides 状态以实现 "记忆"
         setCurrentSlides(result.slides_data);
 
@@ -83,7 +84,7 @@ function App() {
 
       setIsLoading(false);
     }
-    
+
     // 4. 处理任务失败
     if (status === TaskStatus.FAILURE) {
       const errorMsg = taskError || "任务失败";
@@ -105,7 +106,7 @@ function App() {
       // [V2 节点 1]：只提交任务，不等待结果
       const response = await generationAPI.generateOutline_conversational(newHistory);
       startPolling(response.data.task_id); // 启动轮询
-      
+
     } catch (err) { // API 提交失败
       const errorMsg = err.response?.data?.detail || err.message || '大纲请求提交失败';
       setError(errorMsg);
@@ -149,14 +150,14 @@ function App() {
       setChatHistory([...chatHistory, { role: 'assistant', content: errorMsg }]);
       return;
     }
-    
+
     // [CTO 关键修复]：将 V2 Outline 转换为 V2 SlidesData 结构
     // 这是 "内容阶段" 的初始状态 (v1)。
     const initialSlides = [
-      { 
-        slide_type: "title", 
-        title: lastOutline.main_topic, 
-        subtitle: lastOutline.summary_topic || "" 
+      {
+        slide_type: "title",
+        title: lastOutline.main_topic,
+        subtitle: lastOutline.summary_topic || ""
       },
       ...lastOutline.outline.map((item) => ({
         slide_type: "two_column",
@@ -164,9 +165,9 @@ function App() {
         left_content: [item.topic1], // 默认为数组
         right_content: [item.topic2] // 默认为数组
       })),
-      { 
-        slide_type: "content", 
-        title: lastOutline.summary_topic, 
+      {
+        slide_type: "content",
+        title: lastOutline.summary_topic,
         content: ["谢谢观看"] // 添加一个默认的总结页
       }
     ];
@@ -176,19 +177,19 @@ function App() {
     setPhase(PHASE_CONTENT); // 2. 切换阶段
     setError(null);
     resetTask(); // 3. 重置 useTask 以准备下一次轮询
-    
+
     // 4. 重置聊天记录，并显示系统消息和 *初始幻灯片*
     setChatHistory([
       CONTENT_SYSTEM_MSG,
       { role: 'assistant', content: JSON.stringify(initialSlides, null, 2) }
-    ]); 
+    ]);
   };
 
   // --- 阶段转换 2: 内容 -> 导出 (已修复) ---
   const handleExport = async () => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       // [CTO 修复 P1]：从 `currentSlides` 状态获取最终数据
       const finalSlides = currentSlides;
@@ -201,7 +202,7 @@ function App() {
         title: finalSlides.find(s => s.slide_type === 'title')?.title || "演示文稿",
         slides_data: finalSlides
       };
-      
+
       const response = await generationAPI.exportPpt(contentJson);
       if (!response.data || !response.data.task_id) {
         throw new Error("启动导出任务失败");
@@ -209,7 +210,7 @@ function App() {
 
       resetTask();
       startPolling(response.data.task_id);
-      setPhase(PHASE_EXPORTING); 
+      setPhase(PHASE_EXPORTING);
 
     } catch (e) {
       const errorMsg = e.message || "导出失败";

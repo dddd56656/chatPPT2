@@ -34,7 +34,7 @@ router = APIRouter()
 def get_task_status(task_id: str):
     """
     查询任务状态 (用于前端轮询)。
-    
+
     [CTO注]: 此端点无需更改。
     它现在轮询 V2 的三个独立任务 (`..._conversational_task`, `export_ppt_task`)。
     """
@@ -57,22 +57,27 @@ def get_task_status(task_id: str):
 
     if task_result.ready():
         if task_result.failed():
-            error_message = str(task_result.info)
+            # [CTO 修复]：失败的异常存储在 .result (或 .info, 取决于版本)，
+            # .result 更可靠。
+            error_message = str(task_result.result or task_result.info)
+
         elif task_result.successful():
-            try:
-                # 验证数据合约 (Data Contract)
-                # [CTO注]：所有 V2 任务现在都返回 TaskResultData 兼容的字典
+            try:  # [CTO 修复] 1. 添加 'try'
+                # [CTO 修复] 2. 修正 'task_result_data' 的缩进
                 task_result_data = TaskResultData.model_validate(task_result.result)
-            except ValidationError as e:
+            except ValidationError as e:  # [CTO 修复] 3. 修正 'except' 的缩进
+                # [CTO 修复]：`_set_state` 不存在。
+                # 路由的职责是 *报告* 失败，而不是 *修改* 任务状态。
                 logging.warning(f"任务 {task_id} 成功, 但数据合约验证失败: {e}")
                 status = TaskStatus.FAILURE
                 error_message = f"Worker返回的数据结构与Schema不匹配: {e}"
-                task_result._set_state("FAILURE")
-            except Exception as e:
+                # task_result._set_state("FAILURE") # <-- 移除此行
+            except Exception as e:  # [CTO 修复] 3. 修正 'except' 的缩进
+                # [CTO 修复]：移除此处的 _set_state
                 logging.error(f"任务 {task_id} 结果解析失败: {e}")
                 status = TaskStatus.FAILURE
                 error_message = f"任务结果解析失败: {e}"
-                task_result._set_state("FAILURE")
+                # task_result._set_state("FAILURE") # <-- 移除此行
 
     return TaskResponse(
         task_id=task_id,
@@ -102,19 +107,26 @@ def download_ppt_file_direct(task_id: str):
     result = task_result.result
     if not isinstance(result, dict) or "ppt_file_path" not in result:
         logging.error(f"任务 {task_id} 结果无效: 缺少 'ppt_file_path'. 结果: {result}")
-        raise HTTPException(status_code=500, detail="任务结果无效：未在结果中找到 'ppt_file_path'")
+        raise HTTPException(
+            status_code=500, detail="任务结果无效：未在结果中找到 'ppt_file_path'"
+        )
 
     file_path = result["ppt_file_path"]
-    
+
     # [CTO注]：V2 节点 1 和 2 会返回 None 路径，这是正常的。
     # 只有节点 3 (导出) 才会返回真实路径。
     if not file_path:
-        raise HTTPException(status_code=404, detail="此任务无权下载文件 (例如：这是一个大纲或内容生成任务，而非导出任务)")
+        raise HTTPException(
+            status_code=404,
+            detail="此任务无权下载文件 (例如：这是一个大纲或内容生成任务，而非导出任务)",
+        )
 
     # 4. 验证路径的绝对性和存在性 (防止路径操纵和IO错误)
     if not os.path.isabs(file_path):
         logging.error(f"任务 {task_id} 路径无效: 路径不是绝对路径. 路径: {file_path}")
-        raise HTTPException(status_code=500, detail="任务结果无效：文件路径不是绝对路径")
+        raise HTTPException(
+            status_code=500, detail="任务结果无效：文件路径不是绝对路径"
+        )
 
     if not os.path.exists(file_path):
         logging.error(f"任务 {task_id} 文件丢失: 磁盘上未找到. 路径: {file_path}")

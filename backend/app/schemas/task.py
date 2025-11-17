@@ -42,7 +42,7 @@ class TaskResultData(BaseModel):
     status: str = Field(
         ..., description="内部成功状态", json_schema_extra={"example": "success"}
     )
-    ppt_file_path: str = Field(..., description="生成的PPT文件的绝对路径")
+    ppt_file_path: Optional[str] = Field(None, description="生成的PPT文件的绝对路径")
     message: Optional[str] = Field(
         None, description="附加信息", json_schema_extra={"example": "PPT生成成功"}
     )
@@ -60,7 +60,9 @@ class TaskResponse(BaseModel):
 
     task_id: str = Field(..., description="任务ID")
     status: TaskStatus = Field(..., description="任务状态 (来自TaskStatus枚举)")
-    result: Optional[TaskResultData] = Field(None, description="任务结果 (当状态为SUCCESS时)")
+    result: Optional[TaskResultData] = Field(
+        None, description="任务结果 (当状态为SUCCESS时)"
+    )
     error: Optional[str] = Field(None, description="错误信息 (当状态为FAILURE时)")
 
 
@@ -77,7 +79,9 @@ class ConversationalContentRequest(BaseModel):
     """(V2 异步) 对话式生成内容的请求 (POST /generation/content_conversational)"""
 
     history: List[Dict[str, str]] = Field(..., description="完整的聊天记录")
-    current_slides: List[Dict[str, Any]] = Field(..., description="当前前端持有的幻灯片数据")
+    current_slides: List[Dict[str, Any]] = Field(
+        ..., description="当前前端持有的幻灯片数据"
+    )
 
 
 class ExportRequest(BaseModel):
