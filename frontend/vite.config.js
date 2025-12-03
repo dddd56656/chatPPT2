@@ -5,6 +5,9 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   server: {
+    host: '127.0.0.1', // [New] Force IPv4 to resolve "permission denied ::1"
+    port: 3000,        // [New] Use port 3000 to avoid conflict on 5173
+    
     // 配置开发服务器代理，解决跨域问题
     proxy: {
       // 匹配所有以 /api 开头的请求
