@@ -21,3 +21,11 @@ pytest==7.4.3
 pytest-asyncio==0.21.1
 black==23.11.0
 isort==5.13.2
+
+# [V3 修复] 升级 LangChain 生态至 0.2.x 以兼容 DeepSeek
+# langchain-deepseek 强制要求 langchain >= 0.2.6
+langchain>=0.2.6
+langchain-community>=0.2.6
+langchain-core>=0.2.10
+langchain-deepseek==0.0.1
+async-timeout==4.0.3

@@ -1,107 +1,118 @@
 """
-大纲生成服务 (outline.py) - [V2 专注模式]
+大纲生成服务 (outline.py) - [V3 流式 + 记忆版]
 
 CTO 注释:
-[V2 重构]：已移除 V1 (Batch) 模式的 `generate_outline` 方法。
-此模块现在 *只* 负责 V2 (Conversational) 模式。
+[V3 重构]：
+1. 引入 `RunnableWithMessageHistory` 实现自动记忆。
+2. 新增 `generate_outline_stream` 方法，返回异步生成器 (AsyncGenerator)。
 """
 
 import os
 import logging
-from typing import Dict, Any, List, Optional
+import json
+from typing import AsyncGenerator
 from langchain_deepseek import ChatDeepSeek
-from langchain_core.prompts import ChatPromptTemplate
-from pydantic import BaseModel, Field
-from langchain_core.exceptions import OutputParserException
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.output_parsers import PydanticOutputParser
+from langchain_community.chat_message_histories import RedisChatMessageHistory
+from langchain_core.runnables.history import RunnableWithMessageHistory
+from pydantic import BaseModel, Field, ValidationError
+
+from app.core.config import settings
 
 # --- 日志配置 ---
 logger = logging.getLogger(__name__)
 
-# --- 1. 大纲生成 Pydantic Schema ---
+# --- 1. Pydantic 模型 ---
 class OutlineModel(BaseModel):
     """Pydantic模型：用于大纲生成"""
-
     main_topic: str = Field(..., description="演示文稿主主题")
-    outline: List[Dict[str, str]] = Field(..., description="大纲结构列表")
+    outline: list[dict] = Field(..., description="大纲结构列表 [{'topic': '...'}, ...]")
     summary_topic: str = Field(..., description="总结幻灯片主题")
 
 
 # --- 2. 系统指令 ---
-# V2 模式的指令 (支持对话)
-OUTLINE_CONVERSATIONAL_PROMPT = """[系统指令]
+OUTLINE_SYSTEM_PROMPT = """[系统指令]
 你是一名PPT结构设计专家。
-- 如果用户是第一次发言 (历史记录中只有一条 'user' 消息)，请根据用户需求生成合理的PPT大纲结构，并严格按照 Pydantic JSON 格式输出。
-- 如果用户的历史记录中包含一个AI生成的JSON大纲和用户的修改意见 (例如：'请修改第二点')，请根据用户的修改意见更新大纲，并再次严格按照 Pydantic JSON 格式输出。
-- 你的回复必须是纯粹的Pydantic JSON格式，绝对不能包含任何解释性文字或道歉。"""
+请根据用户的需求生成或修改合理的PPT大纲结构。
+你必须严格按照 JSON 格式输出，不要包含任何 Markdown 格式（如 ```json）。
+输出必须符合以下 Schema：
+{
+  "main_topic": "string",
+  "outline": [{"sub_topic": "string", "topic1": "string", "topic2": "string"}],
+  "summary_topic": "string"
+}
+"""
 
 # --- 3. 大纲生成器服务 ---
 
 class OutlineGenerator:
     """
-    大纲生成服务，仅支持 V2 (Conversational) 模式。
+    大纲生成服务 (V3 Streaming)
     """
 
     def __init__(self):
-        """初始化大纲生成器"""
         self.api_key = os.environ.get("DEEPSEEK_API_KEY")
-
         if not self.api_key:
-            logger.warning("DEEPSEEK_API_KEY 环境变量未设置。API调用将失败。")
             raise ValueError("DEEPSEEK_API_KEY 未设置")
 
-        # 初始化 LangChain
-        try:
-            self.llm = ChatDeepSeek(
-                model="deepseek-chat", temperature=0, api_key=self.api_key
-            )
-            
-            # [V2 链]: 用于 `generate_outline_conversational`
-            self.conversational_chain = ChatPromptTemplate.from_messages(
-                [
-                    ("system", OUTLINE_CONVERSATIONAL_PROMPT),
-                    ("placeholder", "{history}"),
-                ]
-            ) | self.llm.with_structured_output(OutlineModel)
-        except Exception as e:
-            logger.error(f"初始化 OutlineGenerator (LangChain) 失败: {e}")
-            raise
+        # 1. 初始化 LLM
+        self.llm = ChatDeepSeek(
+            model="deepseek-chat", 
+            temperature=0.1,  # 降低随机性以保证 JSON 格式
+            api_key=self.api_key
+        )
 
-    def generate_outline_conversational(
-        self, history: List[Dict[str, str]]
-    ) -> Dict[str, Any]:
+        # 2. 定义 Prompt，加入 History 占位符
+        self.prompt = ChatPromptTemplate.from_messages([
+            ("system", OUTLINE_SYSTEM_PROMPT),
+            MessagesPlaceholder(variable_name="history"),
+            ("human", "{input}"),
+        ])
+
+        # 3. 基础链 (Prompt -> LLM)
+        # 注意：这里不使用 with_structured_output，因为我们需要流式传输原始 Token
+        # JSON 解析将在前端完成，或者在流结束后在后端校验
+        self.chain = self.prompt | self.llm
+
+        # 4. 包装链 (增加 Redis 记忆能力)
+        self.chain_with_history = RunnableWithMessageHistory(
+            self.chain,
+            self._get_session_history,
+            input_messages_key="input",
+            history_messages_key="history",
+        )
+
+    def _get_session_history(self, session_id: str):
+        """获取 Redis 历史记录存储对象"""
+        return RedisChatMessageHistory(
+            session_id=session_id,
+            url=settings.redis_url,
+            ttl=3600  # 1小时过期
+        )
+
+    async def generate_outline_stream(self, session_id: str, user_input: str) -> AsyncGenerator[str, None]:
         """
-        [V2 核心] 根据完整的聊天历史生成或修改大纲
-        (由 tasks.generate_outline_conversational_task 调用)
+        [V3 核心] 流式生成大纲
+        Yields:
+            str: SSE 数据块
         """
-        logger.info(f"V2: 开始对话式大纲生成，历史消息数：{len(history)}")
+        logger.info(f"V3 Stream: 开始生成大纲, Session: {session_id}")
+        
         try:
-            # 1. 转换 history 格式
-            langchain_history = []
-            for msg in history:
-                if msg.get("role") != "system":
-                    langchain_history.append((msg.get("role"), msg.get("content")))
+            # 调用 astream，自动处理历史记录的读取和保存
+            async for chunk in self.chain_with_history.astream(
+                {"input": user_input},
+                config={"configurable": {"session_id": session_id}}
+            ):
+                # chunk.content 是生成的文本片段
+                if chunk.content:
+                    yield chunk.content
 
-            # 2. 调用新的V2对话链
-            outline_model = self.conversational_chain.invoke(
-                {"history": langchain_history}
-            )
-            logger.info(f"V2: 对话式大纲生成/修改成功：主主题 '{outline_model.main_topic}'")
-
-            # 3. 返回数据结构
-            return {
-                "main_topic": outline_model.main_topic,
-                "outline": outline_model.outline,
-                "summary_topic": outline_model.summary_topic,
-                "status": "success",
-            }
         except Exception as e:
-            logger.error(f"V2: 对话式大纲生成/修改失败: {e}")
-            return {
-                "status": "error",
-                "error": str(e),
-            }
+            logger.error(f"V3 Stream Error: {e}")
+            yield f"\n\n[ERROR] 生成失败: {str(e)}"
 
-# --- 4. 服务工厂函数 ---
+# --- 工厂函数 ---
 def create_outline_generator() -> OutlineGenerator:
-    """创建大纲生成器实例的工厂函数"""
     return OutlineGenerator()
