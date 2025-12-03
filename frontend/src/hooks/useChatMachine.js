@@ -5,6 +5,7 @@
 import { useReducer, useCallback, useEffect, useRef } from 'react';
 import { useStream } from './useStream';
 import { streamEndpoints } from '../api/client';
+import { useTask } from './useTask';
 
 const initialState = {
   phase: 'outline', 
@@ -53,8 +54,6 @@ const extractJSON = (rawStr) => {
 
   if (start !== -1) {
     clean = clean.substring(start);
-    // Note: We don't strictly find the end because streaming might be incomplete,
-    // but JSON.parse will fail gracefully.
   }
   return clean;
 };
@@ -64,7 +63,9 @@ const generateUUID = () => Math.random().toString(36).substring(2) + Date.now().
 export const useChatMachine = () => {
   const [state, dispatch] = useReducer(chatReducer, initialState);
   const { streamRequest, abortStream } = useStream();
+  const { startExportPolling } = useTask(); // Integrate Task Polling
   const stateRef = useRef(state);
+  
   useEffect(() => { stateRef.current = state; }, [state]);
 
   useEffect(() => {
@@ -84,38 +85,90 @@ export const useChatMachine = () => {
     dispatch({ type: 'SET_LOADING', payload: true });
 
     const { phase, sessionId, currentSlides } = stateRef.current;
-    const endpoint = phase === 'outline' ? streamEndpoints.outline : streamEndpoints.content;
-    const body = { session_id: sessionId, user_message: text, current_slides: phase === 'content' ? currentSlides : undefined };
-
-    await streamRequest(endpoint, body, {
-      onChunk: (textChunk) => dispatch({ type: 'STREAM_UPDATE', payload: textChunk }),
-      onDone: () => {
-        dispatch({ type: 'SET_LOADING', payload: false });
-        // Auto-parse content
-        if (stateRef.current.phase === 'content') {
-            const msgs = stateRef.current.messages;
-            const content = msgs[msgs.length - 1].content;
-            try {
-                const cleanJson = extractJSON(content);
-                const slides = JSON.parse(cleanJson);
-                if (Array.isArray(slides)) dispatch({ type: 'SET_SLIDES', payload: slides });
-            } catch (e) {
-                console.warn("Parsing partial JSON failed (expected during stream):", e);
-            }
+    
+    // Note: Ensure your backend supports these endpoints!
+    // Fallback to conversational endpoints if stream not available
+    // Here we assume V2 Async endpoints for now, but simulating stream structure
+    // If you are using true V2 Async, this logic adapts to wait for tasks.
+    // For this refactor, we align with the V2 Async API you provided earlier.
+    
+    // HACK: Since we are using V2 Async API (Task-based) in this environment,
+    // we will simulate the stream experience or use the V2 task polling mechanism
+    // if the backend hasn't been upgraded to true streaming yet.
+    
+    // However, per previous context, we stick to the provided API structure.
+    // Let's assume the V2 API client is set up.
+    
+    // Using the generationAPI from client.js (V2 Async)
+    try {
+        const { generationAPI } = await import('../api/client');
+        
+        let response;
+        if (phase === 'outline') {
+            // Construct history for V2 API
+            const history = stateRef.current.messages.map(m => ({
+                role: m.role,
+                content: m.content
+            }));
+            response = await generationAPI.generateOutline_conversational(history);
+        } else {
+            const history = [
+                 { role: 'system', content: '用户正在修改内容' },
+                 { role: 'user', content: text }
+            ];
+            response = await generationAPI.generateContent_conversational(history, currentSlides);
         }
-      },
-      onError: (err) => {
-        dispatch({ type: 'SET_ERROR', payload: err });
-        dispatch({ type: 'STREAM_UPDATE', payload: `\n[System Error]: ${err}` });
-      }
-    });
-  }, [streamRequest]);
+        
+        // V2 Async Logic: We get a Task ID, we need to poll it.
+        // But useChatMachine was designed for Streaming.
+        // We will bridge it here:
+        
+        const taskId = response.data.task_id;
+        
+        // Temporary Polling inside the Machine (Bridging V2 Async to Stream-like UX)
+        const pollInterval = setInterval(async () => {
+            const { taskAPI } = await import('../api/client');
+            const res = await taskAPI.getTaskStatus(taskId);
+            const status = res.data.status;
+            
+            if (status === 'success') {
+                clearInterval(pollInterval);
+                const result = res.data.result;
+                
+                let aiText = "";
+                if (result.outline) {
+                     aiText = JSON.stringify(result.outline, null, 2);
+                     dispatch({ type: 'STREAM_UPDATE', payload: aiText });
+                     // Auto confirm logic not needed, user clicks button
+                } else if (result.slides_data) {
+                     aiText = JSON.stringify(result.slides_data, null, 2); // Hidden raw data
+                     dispatch({ type: 'STREAM_UPDATE', payload: "内容已更新，请查看右侧预览。" });
+                     dispatch({ type: 'SET_SLIDES', payload: result.slides_data });
+                }
+                
+                dispatch({ type: 'SET_LOADING', payload: false });
+            } else if (status === 'failure') {
+                clearInterval(pollInterval);
+                dispatch({ type: 'STREAM_UPDATE', payload: `Error: ${res.data.error}` });
+                dispatch({ type: 'SET_ERROR', payload: res.data.error });
+            }
+        }, 1000);
+        
+    } catch (e) {
+        dispatch({ type: 'SET_ERROR', payload: e.message });
+        dispatch({ type: 'SET_LOADING', payload: false });
+    }
+
+  }, []);
 
   const confirmOutline = useCallback(() => {
     const { messages } = stateRef.current;
     const lastMsg = messages[messages.length - 1];
     try {
+      // Robust JSON extraction
       const cleanJson = extractJSON(lastMsg.content);
+      if (!cleanJson) throw new Error("No JSON found");
+      
       const data = JSON.parse(cleanJson);
 
       const initialSlides = [
@@ -131,14 +184,42 @@ export const useChatMachine = () => {
 
       dispatch({ type: 'SET_SLIDES', payload: initialSlides });
       dispatch({ type: 'SET_PHASE', payload: 'content' });
-      dispatch({ type: 'ADD_USER_MSG', payload: 'Outline confirmed. Generating content previews...' });
+      dispatch({ type: 'ADD_USER_MSG', payload: '大纲已确认，正在生成预览...' });
+      
+      // Auto-trigger content generation (Optional, but good UX)
+      // sendMessage("Generate content for all slides"); 
     } catch (e) {
       console.error(e);
-      dispatch({ type: 'SET_ERROR', payload: "Failed to parse outline JSON. Please try regenerating." });
+      dispatch({ type: 'SET_ERROR', payload: "无法解析大纲 JSON，请重试。" });
     }
   }, []);
 
-  const startExport = useCallback(() => { dispatch({ type: 'SET_PHASE', payload: 'exporting' }); }, []);
+  const startExport = useCallback(async () => {
+     try {
+        const { currentSlides } = stateRef.current;
+        dispatch({ type: 'SET_LOADING', payload: true });
+        
+        const { generationAPI } = await import('../api/client');
+        const contentJson = {
+            title: currentSlides.find(s => s.slide_type === 'title')?.title || "Presentation",
+            slides_data: currentSlides
+        };
+        
+        const res = await generationAPI.exportPpt(contentJson);
+        const taskId = res.data.task_id;
+        
+        // Handover to useTask for download handling
+        startExportPolling(taskId);
+        
+        dispatch({ type: 'ADD_AI_PLACEHOLDER' });
+        dispatch({ type: 'STREAM_UPDATE', payload: "正在后台导出 PPT..." });
+        dispatch({ type: 'SET_LOADING', payload: false });
+        
+     } catch (e) {
+        dispatch({ type: 'SET_ERROR', payload: "导出启动失败" });
+     }
+  }, [startExportPolling]);
+
   const reset = useCallback(() => { abortStream(); dispatch({ type: 'RESET' }); }, [abortStream]);
 
   return { state, actions: { sendMessage, confirmOutline, startExport, reset } };
