@@ -21,3 +21,10 @@ pytest==7.4.3
 pytest-asyncio==0.21.1
 black==23.11.0
 isort==5.13.2
+
+# [V3 修复] 使用稳定版 langchain-openai 替代不稳定的 deepseek 包
+langchain>=0.2.6
+langchain-community>=0.2.6
+langchain-core>=0.2.10
+langchain-openai>=0.1.8
+async-timeout==4.0.3

@@ -1,97 +1,69 @@
 """
-[V2 重构] 对话式生成路由 (完全异步)
-
-CTO注：此文件已完全重构。
-所有端点现在都调用 Celery 异步任务 (高并发)，并立即返回 TaskResponse。
-前端 (App.jsx) 现在必须轮询这些任务来获取 JSON 结果。
+[V3 API] 流式生成控制器
 """
-
-from fastapi import APIRouter, HTTPException
 import logging
-
-# 1. 导入 Celery 任务
-from app.worker.tasks import (
-    generate_outline_conversational_task,
-    generate_content_conversational_task,
-    export_ppt_task,
-)
-
-# 2. 导入数据合约 (Schemas)
-from app.schemas.task import (
-    ConversationalOutlineRequest,
-    ConversationalContentRequest,
-    ExportRequest,
-    TaskResponse,
-    TaskStatus,
-)
+import json
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
+from app.services.outline import create_outline_generator
+from app.services.content import ContentGeneratorV1
+from app.schemas.task import ConversationalOutlineRequest, ConversationalContentRequest
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+# [CTO Fix]: 全局变量预定义，防止 NameError
+outline_service = None
+content_service = None
 
-@router.post("/generation/outline_conversational", response_model=TaskResponse)
-def async_generate_outline_conversational(request: ConversationalOutlineRequest):
-    """
-    [V2 异步节点 1]
+# 初始化服务 (带容错)
+try:
+    outline_service = create_outline_generator()
+    content_service = ContentGeneratorV1()
+    logger.info("AI Services Initialized Successfully.")
+except Exception as e:
+    logger.critical(f"Service Init Failed: {e}")
+    # 注意：这里不抛出异常，允许服务启动，但在调用时报错
 
-    接收聊天历史，提交 *异步* 大纲生成任务。
-    立即返回 TaskID 供前端轮询。
-    """
-    try:
-        if not request.history:
-            raise HTTPException(status_code=422, detail="'history' 不能为空")
-
-        # 1. 提交给 Celery (非阻塞)
-        task = generate_outline_conversational_task.delay(request.history)
-
-        # 2. 立即返回 Task ID
-        return TaskResponse(task_id=task.id, status=TaskStatus.PENDING, result=None)
-    except Exception as e:
-        logger.error(f"V2 异步大纲任务提交失败: {e}", exc_info=True)
-        raise HTTPException(status_code=503, detail=f"任务Broker连接失败: {str(e)}")
-
-
-@router.post("/generation/content_conversational", response_model=TaskResponse)
-def async_generate_content_conversational(request: ConversationalContentRequest):
-    """
-    [V2 异步节点 2]
-
-    接收聊天历史和当前内容，提交 *异步* 内容修改任务。
-    立即返回 TaskID 供前端轮询。
-    """
-    try:
-        if not request.history:
-            raise HTTPException(status_code=422, detail="'history' 不能为空")
-
-        # 1. 提交给 Celery (非阻塞)
-        task = generate_content_conversational_task.delay(
-            request.history, request.current_slides
+@router.post("/stream/outline")
+async def stream_outline(request: ConversationalOutlineRequest):
+    """SSE: 大纲生成"""
+    # [CTO Fix]: 调用前检查服务是否可用
+    if not outline_service:
+        raise HTTPException(
+            status_code=503, 
+            detail="AI Service Unavailable. Please check backend logs (API Key missing?)."
         )
 
-        # 2. 立即返回 Task ID
-        return TaskResponse(task_id=task.id, status=TaskStatus.PENDING, result=None)
-    except Exception as e:
-        logger.error(f"V2 异步内容任务提交失败: {e}", exc_info=True)
-        raise HTTPException(status_code=503, detail=f"任务Broker连接失败: {str(e)}")
-
-
-@router.post("/generation/export", response_model=TaskResponse)
-def async_export_ppt(request: ExportRequest):
-    """
-    [V2 异步节点 3 - 最终步骤] (此接口保持不变)
-
-    接收最终确认的内容，将其 *交给Celery* 进行后台导出，
-    并立即返回一个 task_id。
-    """
-    try:
-        # 1. 提交给 Celery (非阻塞)
-        task = export_ppt_task.delay(request.content)
-
-        # 2. 立即返回 Task ID
-        return TaskResponse(
-            task_id=task.id, status=TaskStatus.PENDING, result=None, error=None
+    async def _generator():
+        stream = outline_service.generate_outline_stream(
+            session_id=request.session_id, user_input=request.user_message
         )
-    except Exception as e:
-        # (这很可能是 Broker 连接错误)
-        logger.error(f"V2 异步导出任务提交失败: {e}", exc_info=True)
-        raise HTTPException(status_code=503, detail=f"任务Broker连接失败: {str(e)}")
+        async for token in stream:
+            payload = json.dumps({"text": token}, ensure_ascii=False)
+            yield f"data: {payload}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(_generator(), media_type="text/event-stream")
+
+@router.post("/stream/content")
+async def stream_content(request: ConversationalContentRequest):
+    """SSE: 内容生成"""
+    if not content_service:
+        raise HTTPException(
+            status_code=503, 
+            detail="AI Service Unavailable. Please check backend logs."
+        )
+
+    async def _generator():
+        stream = content_service.generate_content_stream(
+            session_id=request.session_id,
+            user_input=request.user_message,
+            current_slides=request.current_slides
+        )
+        async for token in stream:
+            payload = json.dumps({"text": token}, ensure_ascii=False)
+            yield f"data: {payload}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(_generator(), media_type="text/event-stream")
