@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const apiClient = axios.create({
-  baseURL: '',
+  baseURL: '', // 依赖 Vite proxy
   timeout: 60000,
 });
 
@@ -13,30 +13,20 @@ apiClient.interceptors.response.use(
   }
 );
 
-// --- V3 流式端点 (预留) ---
+// --- V3 流式端点 (Core) ---
+// 前端将通过 useStream Hook 直接连接这些端点
 export const streamEndpoints = {
   outline: '/api/v1/stream/outline',
   content: '/api/v1/stream/content',
 };
 
-// --- V2 异步生成 API ---
+// --- V3 任务 API (Export Only) ---
+// 仅用于 PPT 导出这种非流式的耗时任务
 export const generationAPI = {
-  generateOutline_conversational: (chatHistory) =>
-    apiClient.post('/api/v1/generation/outline_conversational', {
-      history: chatHistory
-    }),
-
-  generateContent_conversational: (chatHistory, currentSlides) =>
-    apiClient.post('/api/v1/generation/content_conversational', {
-      history: chatHistory,
-      current_slides: currentSlides
-    }),
-
   exportPpt: (contentData) =>
     apiClient.post('/api/v1/generation/export', { content: contentData }),
 };
 
-// --- V1/V2 任务管理 API ---
 export const taskAPI = {
   getTaskStatus: (taskId) =>
     apiClient.get(`/api/v1/tasks/${taskId}`),

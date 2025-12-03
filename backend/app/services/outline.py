@@ -1,12 +1,9 @@
-"""
-Service - Outline Generator (Streaming First)
-"""
 import logging
 import json
+import sys
 from typing import AsyncGenerator
 from app.core.config import settings
 
-# 延迟导入以避免某些环境下的依赖报错
 try:
     from langchain_openai import ChatOpenAI
     from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -15,16 +12,30 @@ try:
 except ImportError:
     pass
 
+logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-OUTLINE_SYSTEM_PROMPT = """[System Instruction]
-You are a senior presentation architect.
-Generate a structured PPT outline JSON based on the user's topic.
+# [CTO Fix]: 
+# 1. 强制要求 "Simplified Chinese" (简体中文)
+# 2. 使用 {{ }} 转义 JSON 示例，防止 LangChain 报错
+OUTLINE_SYSTEM_PROMPT = """You are a professional presentation architect.
+Please generate a structured PPT outline based on the user's request.
 
 RULES:
-1. Output JSON ONLY. No markdown, no explanations.
-2. Structure: { "main_topic": "...", "outline": [ {"sub_topic": "...", "topic1": "...", "topic2": "..."} ], "summary_topic": "..." }
-3. Be professional and concise.
+1. **Language**: Output MUST be in **Simplified Chinese (简体中文)**.
+2. **Format**: Output RAW JSON only. No markdown formatting.
+3. **Structure**:
+{{
+  "main_topic": "PPT主标题",
+  "outline": [
+    {{
+      "sub_topic": "页面标题",
+      "topic1": "要点1",
+      "topic2": "要点2"
+    }}
+  ],
+  "summary_topic": "总结页标题"
+}}
 """
 
 class OutlineGenerator:
@@ -34,10 +45,11 @@ class OutlineGenerator:
 
         self.llm = ChatOpenAI(
             model="deepseek-chat",
-            temperature=0.5,
+            temperature=0.3, # 稍微提高温度以获得更好的中文文案
             api_key=settings.deepseek_api_key,
             base_url="https://api.deepseek.com",
-            streaming=True  # 显式开启流式
+            streaming=True,
+            model_kwargs={"response_format": {"type": "json_object"}}
         )
 
         prompt = ChatPromptTemplate.from_messages([
@@ -61,16 +73,19 @@ class OutlineGenerator:
         )
 
     async def generate_outline_stream(self, session_id: str, user_input: str) -> AsyncGenerator[str, None]:
-        """生成流式大纲数据"""
+        logger.info(f"[Outline Start] Session: {session_id} Input: {user_input}")
         try:
+            # 再次强调 JSON 和中文
+            final_input = f"{user_input} (请输出 JSON，使用简体中文)"
+            
             async for chunk in self.chain.astream(
-                {"input": user_input},
+                {"input": final_input},
                 config={"configurable": {"session_id": session_id}}
             ):
                 if chunk.content:
                     yield chunk.content
         except Exception as e:
-            logger.error(f"Outline Stream Error: {e}")
+            logger.error(f"[Outline Error]: {e}", exc_info=True)
             yield json.dumps({"error": str(e)})
 
 def create_outline_generator():

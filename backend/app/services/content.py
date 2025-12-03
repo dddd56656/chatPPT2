@@ -1,8 +1,6 @@
-"""
-Service - Content Generator (Streaming First)
-"""
 import logging
 import json
+import sys
 from typing import AsyncGenerator, List, Dict, Any
 from app.core.config import settings
 
@@ -14,15 +12,17 @@ try:
 except ImportError:
     pass
 
+logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-CONTENT_SYSTEM_PROMPT = """[System Instruction]
-You are a content editor. Update the slides JSON based on user instructions.
+# [CTO Fix]: 强制中文 + 完整 JSON 返回
+CONTENT_SYSTEM_PROMPT = """You are a content editor. Update the slides JSON based on user instructions.
 
 RULES:
-1. Output JSON ONLY. The output must be a valid JSON array of slides.
-2. NO REPETITION. Do not stutter.
-3. Keep existing structure, only update content fields if requested or empty.
+1. **Language**: All content MUST be in **Simplified Chinese (简体中文)**.
+2. **Action**: Return the **FULL updated JSON** array of slides.
+3. **Format**: Raw JSON only.
+4. If the user asks to modify a specific slide, update that slide and return the whole list.
 """
 
 class ContentGeneratorV1:
@@ -32,15 +32,16 @@ class ContentGeneratorV1:
 
         self.llm = ChatOpenAI(
             model="deepseek-chat",
-            temperature=0.3, # Lower temp for stability in JSON generation
+            temperature=0.2,
             api_key=settings.deepseek_api_key,
             base_url="https://api.deepseek.com",
-            streaming=True
+            streaming=True,
+            model_kwargs={"response_format": {"type": "json_object"}}
         )
 
         prompt = ChatPromptTemplate.from_messages([
             ("system", CONTENT_SYSTEM_PROMPT),
-            ("system", "Current JSON Context: {current_slides_json}"),
+            ("system", "Current JSON: {current_slides_json}"),
             MessagesPlaceholder(variable_name="history"),
             ("human", "{input}"),
         ])
@@ -60,14 +61,14 @@ class ContentGeneratorV1:
         )
 
     async def generate_content_stream(self, session_id: str, user_input: str, current_slides: List[Dict[str, Any]]) -> AsyncGenerator[str, None]:
-        """生成流式内容数据"""
+        logger.info(f"[Content Start] Session: {session_id}")
         try:
-            # 将当前幻灯片状态序列化为字符串，作为上下文
             slides_str = json.dumps(current_slides, ensure_ascii=False)
+            final_input = f"{user_input} (请修改并返回完整的 JSON，使用简体中文)"
             
             async for chunk in self.chain.astream(
                 {
-                    "input": user_input,
+                    "input": final_input,
                     "current_slides_json": slides_str
                 },
                 config={"configurable": {"session_id": session_id}}
@@ -75,7 +76,7 @@ class ContentGeneratorV1:
                 if chunk.content:
                     yield chunk.content
         except Exception as e:
-            logger.error(f"Content Stream Error: {e}")
+            logger.error(f"[Content Error]: {e}", exc_info=True)
             yield json.dumps({"error": str(e)})
 
 def create_content_generator():

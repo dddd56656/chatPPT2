@@ -1,109 +1,98 @@
 :root {
-  --primary: #1a73e8; /* Google Blue */
+  --primary: #1a73e8;
   --bg-color: #f8f9fa;
-  --chat-width: 450px; /* 左侧聊天面板固定宽度 */
+  --chat-width: 450px;
   --border-color: #dadce0;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
-body, html {
+body, html, #root {
   height: 100%;
+  width: 100%;
+  overflow: hidden; /* 禁止 Body 滚动 */
   font-family: 'Google Sans', Roboto, Arial, sans-serif;
   background-color: var(--bg-color);
-  overflow: hidden; /* 防止 Body 滚动，由内部容器接管 */
 }
 
-#root { height: 100%; }
+/* 滚动条美化 */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #dadce0; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #bdc1c6; }
 
-/* --- 主容器：分屏布局 --- */
+/* 核心布局: 左右分屏 */
 .split-layout {
   display: grid;
-  grid-template-columns: var(--chat-width) 1fr; /* 左固定，右自适应 */
+  grid-template-columns: var(--chat-width) 1fr;
   height: 100vh;
   width: 100vw;
+  overflow: hidden;
 }
 
-/* --- 左侧：聊天面板 --- */
+/* === 左侧聊天 === */
 .chat-panel {
   display: flex;
   flex-direction: column;
-  background: #ffffff;
-  border-right: 1px solid var(--border-color);
   height: 100%;
-  position: relative;
-  z-index: 10;
-  box-shadow: 2px 0 10px rgba(0,0,0,0.02);
+  background: white;
+  border-right: 1px solid var(--border-color);
+  min-width: 0; /* 关键: 防止 Flex 子项溢出 */
 }
 
 .chat-header {
   padding: 1rem 1.5rem;
   border-bottom: 1px solid var(--border-color);
-  background: #fff;
+  flex-shrink: 0; /* 头部不可压缩 */
 }
-.chat-header h1 { font-size: 1.25rem; color: #202124; margin: 0; }
+.chat-header h1 { font-size: 1.25rem; margin: 0; color: #202124; }
 .chat-header span { color: var(--primary); }
 
 .chat-messages {
-  flex: 1;
-  overflow-y: auto;
+  flex: 1 1 0; /* 关键: 允许伸缩，且基础高度为0 */
+  overflow-y: auto; /* 必须: 开启滚动 */
   padding: 1.5rem;
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
-  background: #f8f9fa;
+  min-height: 0; /* 关键: 修复 Firefox/Chrome Flex 滚动 */
 }
 
-/* 输入区域 */
 .input-area {
   padding: 1.5rem;
-  background: #fff;
   border-top: 1px solid var(--border-color);
+  background: white;
+  flex-shrink: 0; /* 底部不可压缩 */
 }
-.input-wrapper {
-  display: flex;
-  gap: 0.5rem;
-  background: #f1f3f4;
-  padding: 0.5rem;
-  border-radius: 24px;
-  border: 1px solid transparent;
-  transition: all 0.2s;
-}
-.input-wrapper:focus-within {
-  background: #fff;
-  border-color: var(--primary);
-  box-shadow: 0 1px 4px rgba(0,0,0,0.1);
-}
-.input-wrapper input {
-  flex: 1;
-  border: none;
-  background: transparent;
-  padding: 0.5rem 1rem;
-  outline: none;
-  font-size: 1rem;
-}
-.send-btn {
-  background: var(--primary);
-  color: white;
-  border: none;
-  border-radius: 50%;
-  width: 40px;
-  height: 40px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.2s;
-}
-.send-btn:hover { background: #1557b0; }
-.send-btn:disabled { background: #dadce0; cursor: not-allowed; }
 
-/* 消息气泡 */
-.message-wrapper {
+/* === 右侧预览 === */
+.preview-panel {
   display: flex;
   flex-direction: column;
-  width: 100%;
+  height: 100%;
+  background: #e8eaed;
+  overflow: hidden; /* 内部处理滚动 */
+  min-width: 0;
 }
+
+.preview-scroll-container {
+  flex: 1 1 0; /* 关键: 占据剩余空间 */
+  overflow-y: auto; /* 开启滚动 */
+  padding: 2rem;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.preview-container {
+  width: 100%;
+  max-width: 900px;
+  padding-bottom: 4rem; /* 底部留白 */
+}
+
+/* 消息样式 */
+.message-wrapper { display: flex; flex-direction: column; width: 100%; }
 .message { display: flex; width: 100%; margin-bottom: 0.2rem; }
 .message.user { justify-content: flex-end; }
 .message.assistant { justify-content: flex-start; }
@@ -117,19 +106,45 @@ body, html {
   white-space: pre-wrap;
   word-break: break-word;
 }
-.message.user .bubble {
-  background: var(--primary);
-  color: white;
-  border-bottom-right-radius: 4px;
-}
-.message.assistant .bubble {
-  background: #ffffff;
-  color: #3c4043;
-  border: 1px solid #dadce0;
-  border-bottom-left-radius: 4px;
+.message.user .bubble { background: var(--primary); color: white; border-bottom-right-radius: 4px; }
+.message.assistant .bubble { background: #fff; color: #3c4043; border: 1px solid #dadce0; border-bottom-left-radius: 4px; }
+
+/* 幻灯片样式 */
+.ppt-slide {
+  background: white;
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  margin-bottom: 2rem;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-/* 系统操作卡片 (Action Card) */
+.slide-header {
+  height: 50px;
+  padding: 0 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f8f9fa;
+  border-bottom: 1px solid #eee;
+}
+.slide-header h3 { font-size: 1rem; font-weight: 600; margin: 0; color: #444; }
+
+.slide-body { flex: 1; padding: 2.5rem; display: flex; flex-direction: column; justify-content: center; }
+
+.slide-type-title h1 { font-size: 2.5rem; text-align: center; color: #202124; margin-bottom: 1rem; }
+.slide-type-title p { font-size: 1.25rem; text-align: center; color: #5f6368; }
+.separator { height: 4px; width: 60px; background: #e0e0e0; margin: 0 auto 1rem auto; }
+
+.col-list li { margin-bottom: 0.8rem; font-size: 1rem; color: #333; }
+.two-col-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; height: 100%; }
+.col-box { background: #f8f9fa; padding: 1.5rem; border-radius: 8px; }
+.col-title { font-weight: bold; color: var(--primary); margin-bottom: 1rem; display: block; }
+
+/* Action Card */
 .action-card {
   margin-top: 0.5rem;
   padding: 1rem;
@@ -139,127 +154,27 @@ body, html {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  align-self: flex-start;
   max-width: 85%;
 }
-.action-card h4 { font-size: 0.9rem; color: #174ea6; margin: 0; font-weight: 600; }
 .action-btn {
-  background: #1967d2;
-  color: white;
-  border: none;
-  padding: 0.6rem 1rem;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  cursor: pointer;
-  align-self: flex-start;
-  font-weight: 500;
-  transition: background 0.2s;
-}
-.action-btn:hover { background: #174ea6; }
-
-/* --- 右侧：预览面板 --- */
-.preview-panel {
-  background: #e8eaed; /* 灰色背景模拟画布 */
-  padding: 2rem;
-  overflow-y: auto;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  background: #1967d2; color: white; border: none; padding: 0.6rem 1.2rem;
+  border-radius: 6px; cursor: pointer; font-weight: 500;
 }
 
-.preview-container {
-  max-width: 960px;
-  width: 100%;
-  margin: 0 auto;
+/* 输入框 */
+.input-wrapper {
+  display: flex; gap: 0.5rem; background: #f1f3f4; padding: 0.5rem;
+  border-radius: 24px; transition: all 0.2s;
 }
-
-.preview-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 2rem;
-  background: #fff;
-  padding: 1rem 2rem;
-  border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+.input-wrapper:focus-within { background: white; box-shadow: 0 1px 6px rgba(0,0,0,0.15); }
+.input-wrapper input { flex: 1; border: none; background: transparent; padding: 0.5rem 1rem; outline: none; }
+.send-btn {
+  width: 40px; height: 40px; border-radius: 50%; border: none;
+  background: var(--primary); color: white; cursor: pointer; display: flex; align-items: center; justify-content: center;
 }
+.send-btn:disabled { background: #ccc; cursor: not-allowed; }
 
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 60vh;
-  color: #5f6368;
-  text-align: center;
-}
-
-/* 幻灯片渲染样式 (Native CSS替代Tailwind) */
-.ppt-slide {
-  background: white;
-  aspect-ratio: 16 / 9;
-  width: 100%;
-  margin-bottom: 2rem;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  transition: transform 0.2s;
-}
-.ppt-slide:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,0,0,0.15); }
-
-.slide-header {
-  height: 60px;
-  padding: 0 2rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: #f1f3f4;
-  border-bottom: 1px solid #dadce0;
-}
-.slide-header h3 { font-size: 1.1rem; font-weight: 600; color: #202124; margin: 0; }
-.slide-badge {
-  font-size: 0.75rem;
-  background: #fff;
-  padding: 2px 8px;
-  border-radius: 4px;
-  border: 1px solid #dadce0;
-  color: #5f6368;
-  font-family: monospace;
-}
-
-.slide-body {
-  flex: 1;
-  padding: 3rem;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-
-/* Title Slide Style */
-.slide-type-title { text-align: center; }
-.slide-type-title h1 { font-size: 2.5rem; color: #202124; margin-bottom: 1rem; line-height: 1.2; }
-.separator { height: 4px; width: 60px; background: #dadce0; margin: 0 auto 1.5rem auto; }
-.slide-type-title p { font-size: 1.25rem; color: #5f6368; font-weight: 300; }
-
-/* Content & Two Column Styles */
-.two-col-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; height: 100%; }
-.col-box {
-  background: #f8f9fa;
-  border-radius: 8px;
-  padding: 1.5rem;
-  border: 1px solid #dadce0;
-  display: flex;
-  flex-direction: column;
-}
-.col-title { font-weight: 700; color: #1a73e8; margin-bottom: 1rem; border-bottom: 2px solid #e8eaed; padding-bottom: 0.5rem; }
-.col-list { padding-left: 1.2rem; margin: 0; }
-.col-list li { margin-bottom: 0.5rem; color: #3c4043; font-size: 0.95rem; line-height: 1.5; }
-
-/* 响应式调整 */
 @media (max-width: 900px) {
   .split-layout { grid-template-columns: 1fr; }
-  .preview-panel { display: none; } /* 移动端暂时隐藏预览 */
+  .preview-panel { display: none; }
 }
