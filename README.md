@@ -9,6 +9,7 @@
 - **现代化架构**: 前后端分离，支持容器化部署
 - **专业输出**: 生成标准PPTX格式的专业演示文稿
 - **实时监控**: 前端实时显示任务进度和状态
+- **谷歌标准UI**: 前端界面遵循Material Design指南，提供一致且可访问的用户体验
 
 ## 📁 项目结构
 
@@ -102,9 +103,10 @@ start_dev.bat
 ### 核心架构
 
 - **后端**: FastAPI + Celery + Redis
-- **前端**: React + Vite + Axios
+- **前端**: React + Vite + Axios + Tailwind CSS
 - **任务队列**: Celery用于异步PPT生成
 - **存储**: Redis用于任务状态管理
+- **AI集成**: DeepSeek API via LangChain
 
 ### 平台兼容性说明
 
@@ -120,9 +122,11 @@ start_dev.bat
 
 ### 主要API端点
 
-- `POST /api/tasks` - 创建PPT生成任务
-- `GET /api/tasks/{task_id}` - 获取任务状态
-- `GET /api/tasks/{task_id}/download` - 下载生成的PPT文件
+- `POST /api/v1/stream/outline` - 流式生成PPT大纲 (Server-Sent Events)
+- `POST /api/v1/stream/content` - 流式生成PPT内容 (Server-Sent Events)
+- `POST /api/v1/generation/export` - 提交PPT导出任务
+- `GET /api/v1/tasks/{task_id}` - 获取任务状态
+- `GET /api/v1/tasks/{task_id}/file` - 下载生成的PPT文件
 
 ## 🤝 贡献指南
 

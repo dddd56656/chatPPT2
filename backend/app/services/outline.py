@@ -1,14 +1,8 @@
 """
-Outline Generation Service (outline.py) - [V3 Streaming + Memory]
-
-CTO Notes:
-[V3 Fix]: Replaced `ChatDeepSeek` with `ChatOpenAI` (OpenAI-compatible mode).
-[V3 Fix 2]: Escaped curly braces in system prompts to prevent LangChain formatting errors.
-[V3 Fix 3]: Corrected base_url string format.
+Service - Optimized for DeepSeek (Anti-Repetition)
 """
-
-import os
 import logging
+import json
 from typing import AsyncGenerator
 
 try:
@@ -17,54 +11,40 @@ try:
     from langchain_community.chat_message_histories import RedisChatMessageHistory
     from langchain_core.runnables.history import RunnableWithMessageHistory
 except ImportError as e:
-    raise ImportError(
-        f"Missing dependencies: {e}. Run 'pip install -r backend/requirements.txt'"
-    ) from e
+    raise ImportError(f"Missing dependencies: {e}") from e
 
-from pydantic import BaseModel, Field
 from app.core.config import settings
 
-# --- Logging ---
 logger = logging.getLogger(__name__)
 
-# --- 1. Pydantic Models ---
-class OutlineModel(BaseModel):
-    """Pydantic model for outline generation"""
-    main_topic: str = Field(..., description="Main topic of the presentation")
-    outline: list[dict] = Field(..., description="List of outline structure")
-    summary_topic: str = Field(..., description="Topic for the summary slide")
-
-
-# --- 2. System Prompts (Fixed: Escaped Braces) ---
-# CTO Fix: Double curly braces {{ }} are required for literal JSON in LangChain prompts
 OUTLINE_SYSTEM_PROMPT = """[System Instruction]
-You are a PPT structure design expert.
-Generate or modify a reasonable PPT outline structure based on user requirements.
-You must strictly output in pure JSON format. Do not include any Markdown formatting (like ```json).
-The output must strictly follow this Schema:
+You are a senior presentation architect.
+Generate a structured PPT outline JSON.
+
+RULES:
+1. NO REPETITION. Do not repeat words like 'mainmain'.
+2. Output JSON ONLY. No markdown blocks.
+3. Be concise.
+
+Schema:
 {{
   "main_topic": "string",
   "outline": [{{"sub_topic": "string", "topic1": "string", "topic2": "string"}}],
   "summary_topic": "string"
-}}
-"""
-
-# --- 3. Outline Generator Service ---
+}}"""
 
 class OutlineGenerator:
-    """
-    Outline Generator Service (V3 Streaming)
-    """
-
     def __init__(self):
-        self.api_key = os.environ.get("DEEPSEEK_API_KEY")
+        self.api_key = settings.deepseek_api_key
         if not self.api_key:
-            raise ValueError("DEEPSEEK_API_KEY is not set.")
+            raise ValueError("DEEPSEEK_API_KEY not set in configuration.")
 
-        # Configure ChatOpenAI for DeepSeek
+        # Parameters tuned specifically to prevent "stuttering" (e.g., "mainmain")
         self.llm = ChatOpenAI(
             model="deepseek-chat", 
-            temperature=0.1,
+            temperature=0.4,          # Slightly higher temp to avoid loops
+            frequency_penalty=0.8,    # High penalty for repetition (Crucial fix)
+            presence_penalty=0.1,
             api_key=self.api_key,
             base_url="https://api.deepseek.com",
             max_retries=2
@@ -86,18 +66,10 @@ class OutlineGenerator:
         )
 
     def _get_session_history(self, session_id: str):
-        return RedisChatMessageHistory(
-            session_id=session_id,
-            url=settings.redis_url,
-            ttl=3600
-        )
+        return RedisChatMessageHistory(session_id=session_id, url=settings.redis_url, ttl=3600)
 
     async def generate_outline_stream(self, session_id: str, user_input: str) -> AsyncGenerator[str, None]:
-        """
-        [V3 Core] Stream outline generation
-        """
-        logger.info(f"V3 Stream: Starting outline generation, Session: {session_id}")
-        
+        logger.info(f"Stream started for outline. Session: {session_id}, input length: {len(user_input)}")
         try:
             async for chunk in self.chain_with_history.astream(
                 {"input": user_input},
@@ -105,10 +77,9 @@ class OutlineGenerator:
             ):
                 if chunk.content:
                     yield chunk.content
-
         except Exception as e:
-            logger.error(f"V3 Stream Error: {e}")
-            yield f"\n\n[ERROR] Generation failed: {str(e)}"
+            logger.error(f"Stream Error in outline generation: {e}", exc_info=True)
+            yield json.dumps({"error": str(e)})
 
-def create_outline_generator() -> OutlineGenerator:
+def create_outline_generator():
     return OutlineGenerator()

@@ -1,9 +1,3 @@
-/**
- * [CTO Refactor] App.jsx
- * 职责: 布局容器。
- * 逻辑: 委托给 useChatMachine 和 useTask。
- * 复杂度: 极低 (< 100 行)。
- */
 import React from 'react';
 import { useChatMachine } from './hooks/useChatMachine';
 import { useTask } from './hooks/useTask';
@@ -14,109 +8,89 @@ import { taskAPI } from './api/client';
 import './index.css';
 
 function App() {
-  // 1. 挂载业务逻辑 Hook
   const { state, actions } = useChatMachine();
   const { phase, messages, isLoading, currentSlides, error } = state;
-  
-  // 2. 挂载导出任务 Hook
-  const { 
-    taskId, status, error: exportError, result, 
-    startExportPolling, downloadPPT, resetTask 
-  } = useTask();
+  const { taskId, status, error: exportError, result, startExportPolling, downloadPPT, resetTask } = useTask();
 
-  // 导出处理函数
   const handleExportClick = async () => {
     actions.startExport();
     try {
-      const exportContent = {
-        title: currentSlides.find(s => s.slide_type === 'title')?.title || "演示文稿",
-        slides_data: currentSlides
-      };
+      const exportContent = { title: currentSlides.find(s => s.slide_type === 'title')?.title || "Presentation", slides_data: currentSlides };
       const res = await taskAPI.exportPpt(exportContent);
       startExportPolling(res.data.task_id);
-    } catch (e) {
-      console.error("Export start failed", e);
-    }
+    } catch (e) { console.error(e); }
   };
 
-  const handleReset = () => {
-    actions.reset();
-    resetTask();
-  };
+  const handleReset = () => { actions.reset(); resetTask(); };
 
-  // 渲染主体内容
-  const renderContent = () => {
-    if (phase === 'exporting') {
-      return (
-        <div className="flex-1 flex items-center justify-center p-8 bg-gray-50">
-          <div className="w-full max-w-2xl">
-            <Monitor 
-              taskId={taskId} status={status} error={exportError} result={result}
-              onDownload={downloadPPT} onReset={handleReset}
-            />
-          </div>
-        </div>
-      );
-    }
-
+  if (phase === 'exporting') {
     return (
-      <div className="flex-1 flex gap-6 p-6 h-[calc(100vh-80px)] overflow-hidden">
-        {/* 左栏: 聊天 */}
-        <div className="w-5/12 flex flex-col min-w-[350px]">
-           <ChatWindow
-              messages={messages}
-              onSend={actions.sendMessage}
-              isLoading={isLoading}
-              actionButton={
-                phase === 'outline' 
-                ? { 
-                    text: '确认大纲，生成内容 ->', 
-                    onClick: actions.confirmOutline, 
-                    disabled: isLoading || messages.length < 2 
-                  }
-                : { 
-                    text: '确认内容，导出 PPT ->', 
-                    onClick: handleExportClick, 
-                    disabled: isLoading 
-                  }
-              }
-           />
-           {error && (
-             <div className="mt-2 p-2 bg-red-50 text-red-600 text-sm rounded border border-red-200 text-center">
-               {error}
-             </div>
-           )}
-        </div>
-
-        {/* 右栏: 预览 */}
-        <div className="w-7/12 shadow-lg rounded-xl overflow-hidden">
-           <PreviewPanel slides={currentSlides} />
+      <div className="fixed inset-0 bg-slate-900/90 flex items-center justify-center z-50 backdrop-blur-sm">
+        <div className="bg-white rounded-3xl shadow-2xl p-10 w-full max-w-lg border-4 border-indigo-100">
+          <Monitor taskId={taskId} status={status} error={exportError} result={result} onDownload={downloadPPT} onReset={handleReset} />
         </div>
       </div>
     );
-  };
+  }
 
   return (
-    <div className="app min-h-screen flex flex-col bg-gray-50 font-sans text-gray-900">
-      <header className="app-header bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-4 shadow-md flex justify-between items-center z-20">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">ChatPPT <span className="text-indigo-200 text-sm font-normal">V3</span></h1>
-          <p className="text-xs text-indigo-100 opacity-80">Stream Enabled • Real-time Preview</p>
+    <div className="flex h-screen w-full bg-gray-50 font-sans">
+      {/* Sidebar (Chat) */}
+      <div className="w-[450px] min-w-[350px] flex flex-col bg-white border-r border-gray-200 shadow-xl z-20">
+        {/* Header */}
+        <div className="p-6 bg-gradient-to-r from-blue-600 to-blue-800 text-white shadow-md">
+          <h1 className="text-2xl font-black tracking-tight flex items-center">
+            <span className="text-3xl mr-2">✨</span> ChatPPT <span className="ml-2 text-xs bg-white/20 px-2 py-1 rounded-md font-medium">V3 Pro</span>
+          </h1>
+          <p className="text-blue-100 text-sm mt-1 opacity-90">AI-Powered Presentation Architect</p>
         </div>
-        <div className="flex items-center space-x-4 text-xs font-semibold uppercase tracking-wider">
-            <div className={`px-3 py-1 rounded-full ${phase === 'outline' ? 'bg-white text-indigo-600' : 'bg-indigo-700 text-indigo-300'}`}>1. 大纲</div>
-            <div className="w-4 h-px bg-indigo-400"></div>
-            <div className={`px-3 py-1 rounded-full ${phase === 'content' ? 'bg-white text-indigo-600' : 'bg-indigo-700 text-indigo-300'}`}>2. 内容</div>
-            <div className="w-4 h-px bg-indigo-400"></div>
-            <div className={`px-3 py-1 rounded-full ${phase === 'exporting' ? 'bg-white text-indigo-600' : 'bg-indigo-700 text-indigo-300'}`}>3. 导出</div>
+
+        {/* Phase Indicator */}
+        <div className="flex items-center justify-between px-6 py-4 bg-blue-50 border-b border-blue-100 text-sm font-semibold uppercase tracking-wide text-blue-900">
+          <span className={`px-3 py-1 rounded-full ${phase === 'outline' ? 'bg-blue-600 text-white' : 'text-blue-700 opacity-60'}`}>
+            1. Outline
+          </span>
+          <span className="text-blue-300">➔</span>
+          <span className={`px-3 py-1 rounded-full ${phase === 'content' ? 'bg-blue-600 text-white' : 'text-blue-700 opacity-60'}`}>
+            2. Content
+          </span>
+          <span className="text-blue-300">➔</span>
+          <span className={`px-3 py-1 rounded-full ${phase === 'exporting' ? 'bg-blue-600 text-white' : 'text-blue-700 opacity-60'}`}>
+            3. Export
+          </span>
         </div>
-      </header>
-      
-      <main className="flex-1 w-full max-w-[1600px] mx-auto">
-        {renderContent()}
-      </main>
+        
+        {/* Chat Area */}
+        <div className="flex-1 overflow-hidden bg-gray-50/30">
+          <ChatWindow
+            messages={messages}
+            onSend={actions.sendMessage}
+            isLoading={isLoading}
+            actionButton={
+              phase === 'outline' 
+              ? { text: 'Confirm Outline & Next', onClick: actions.confirmOutline, disabled: isLoading || messages.length < 2 }
+              : { text: 'Generate File (.pptx)', onClick: handleExportClick, disabled: isLoading }
+            }
+          />
+        </div>
+        
+        {error && (
+          <div className="p-4 bg-red-50 border-t border-red-200 flex items-center text-red-700 text-sm">
+            <svg className="w-5 h-5 mr-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+            </svg>
+            <span>{error}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Main Content (Preview) */}
+      <div className="flex-1 flex flex-col h-full bg-slate-100 relative">
+        <div className="flex-1 overflow-y-auto p-10">
+          <PreviewPanel slides={currentSlides} />
+        </div>
+      </div>
     </div>
   );
 }
-
 export default App;
