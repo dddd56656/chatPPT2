@@ -1,66 +1,77 @@
 """
-内容生成服务 (content.py) - [V3 流式 + 记忆版]
+Content Generation Service (content.py) - [V3 Streaming + Memory]
 
-CTO 注释:
-[V3 重构]：
-1. 使用 RunnableWithMessageHistory。
-2. 实现了 `generate_content_stream`。
+CTO Notes:
+[V3 Fix]: Replaced `ChatDeepSeek` with `ChatOpenAI` (OpenAI-compatible mode).
+[V3 Fix 2]: Ensured system prompts are LangChain compatible.
+[V3 Fix 3]: Corrected base_url string format.
 """
 
 import os
 import logging
+import json
 from typing import AsyncGenerator, Dict, Any, List
-from langchain_deepseek import ChatDeepSeek
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_community.chat_message_histories import RedisChatMessageHistory
-from langchain_core.runnables.history import RunnableWithMessageHistory
+
+try:
+    from langchain_openai import ChatOpenAI
+    from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+    from langchain_community.chat_message_histories import RedisChatMessageHistory
+    from langchain_core.runnables.history import RunnableWithMessageHistory
+except ImportError as e:
+    raise ImportError(
+        f"Missing dependencies: {e}. Run 'pip install -r backend/requirements.txt'"
+    ) from e
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# --- 系统指令 ---
-CONTENT_SYSTEM_PROMPT = """[系统指令]
-你是PPT内容编辑专家。
-任务：根据用户请求和当前幻灯片结构，生成或修改幻灯片内容的 JSON。
+# --- System Prompts ---
+CONTENT_SYSTEM_PROMPT = """[System Instruction]
+You are a PPT content editing expert.
+Task: Generate or modify the JSON content for slides based on user requests and the current slide structure.
 
-你将收到：
-1. `current_slides_json`: 当前幻灯片数据。
-2. 用户的具体修改指令。
+You will receive:
+1. `current_slides_json`: The current data of the slides.
+2. The user's specific modification instruction.
 
-要求：
-1. 返回修改后的**完整**幻灯片列表 JSON。
-2. 严禁包含 Markdown 格式标记。
-3. 必须生成真实的文本内容，不要留空。
+Requirements:
+1. Return the **complete** modified list of slides in JSON format.
+2. Do NOT include Markdown formatting.
+3. You must generate real, descriptive text content. Do not leave fields empty.
 """
 
 class ContentGeneratorV1:
     """
-    内容生成服务 (V3 Streaming)
+    Content Generator Service (V3 Streaming)
     """
 
     def __init__(self):
         self.api_key = os.environ.get("DEEPSEEK_API_KEY")
         if not self.api_key:
-            raise ValueError("DEEPSEEK_API_KEY 未设置")
+            raise ValueError("DEEPSEEK_API_KEY is not set.")
 
-        self.llm = ChatDeepSeek(
+        # Configure ChatOpenAI for DeepSeek
+        self.llm = ChatOpenAI(
             model="deepseek-chat", 
             temperature=0.1, 
-            api_key=self.api_key
+            api_key=self.api_key,
+            base_url="https://api.deepseek.com",
+            max_retries=2
         )
 
-        # Prompt 包含 history 和 current_slides_json
+        # Prompt includes history and current_slides_json context
         self.prompt = ChatPromptTemplate.from_messages([
             ("system", CONTENT_SYSTEM_PROMPT),
-            # current_slides 作为上下文传入，不一定要存入 history，作为 system context 即可
-            ("system", "当前幻灯片JSON数据:\n{current_slides_json}"),
+            # Inject current slides as system context context
+            ("system", "Current Slides JSON Data:\n{current_slides_json}"),
             MessagesPlaceholder(variable_name="history"),
             ("human", "{input}"),
         ])
 
         self.chain = self.prompt | self.llm
 
+        # Chain with Memory
         self.chain_with_history = RunnableWithMessageHistory(
             self.chain,
             self._get_session_history,
@@ -82,13 +93,12 @@ class ContentGeneratorV1:
         current_slides: List[Dict[str, Any]]
     ) -> AsyncGenerator[str, None]:
         """
-        [V3 核心] 流式生成内容
+        [V3 Core] Stream content generation
         """
-        logger.info(f"V3 Stream: 开始生成内容, Session: {session_id}")
+        logger.info(f"V3 Stream: Starting content generation, Session: {session_id}")
         
         try:
-            # 将 list 转为 json string
-            import json
+            # Serialize slides to string for the prompt
             slides_str = json.dumps(current_slides, ensure_ascii=False)
 
             async for chunk in self.chain_with_history.astream(

@@ -1,31 +1,19 @@
-/**
- * [CTO 注释]
- * * 文件名: ChatComponents.jsx (新)
- * 职责: 存放聊天界面的可重用UI组件。
- */
 import React, { useState, useRef, useEffect } from 'react';
 
-/**
- * 聊天气泡 (ChatBubble)
- * 根据 'role' (user 或 assistant) 显示不同样式
- */
 export const ChatBubble = ({ message }) => {
   const { role, content } = message;
   const isUser = role === 'user';
-
+  
   return (
     <div className={`chat-bubble-wrapper ${isUser ? 'user' : 'assistant'}`}>
       <div className="chat-bubble">
-        {/* CTO注：我们使用 <pre> 和 <code> 来渲染JSON */}
-        <pre><code>{content}</code></pre>
+        {/* 使用 pre-wrap 保留流式生成的换行符 */}
+        <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">{content}</pre>
       </div>
     </div>
   );
 };
 
-/**
- * 聊天输入框 (ChatInput)
- */
 export const ChatInput = ({ onSend, isLoading }) => {
   const [input, setInput] = useState('');
 
@@ -43,52 +31,50 @@ export const ChatInput = ({ onSend, isLoading }) => {
         type="text"
         value={input}
         onChange={(e) => setInput(e.target.value)}
-        placeholder={isLoading ? "AI 正在思考..." : "输入您的主题或要求..."}
-        disabled={isLoading}
+        placeholder={isLoading ? "AI 正在生成..." : "输入指令..."}
+        disabled={isLoading} 
         className="chat-input"
       />
-      <button type="submit" disabled={isLoading} className="chat-send-btn">
-        {isLoading ? '...' : '发送'}
+      <button 
+        type="submit" 
+        disabled={isLoading || !input.trim()} 
+        className={`chat-send-btn ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+      >
+        发送
       </button>
     </form>
   );
 };
 
-/**
- * 聊天窗口 (ChatWindow)
- * 封装了消息列表和输入框
- */
 export const ChatWindow = ({ messages, onSend, isLoading, actionButton }) => {
   const messagesEndRef = useRef(null);
 
-  // 自动滚动到底部
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages.length, messages[messages.length-1]?.content]);
 
   return (
-    <div className="chat-window-container">
-      <div className="chat-messages-area">
+    <div className="chat-window-container h-full flex flex-col bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+      <div className="chat-messages-area flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((msg, index) => (
           <ChatBubble key={index} message={msg} />
         ))}
-        {isLoading && (
-          <div className="chat-bubble-wrapper assistant">
-            <div className="chat-bubble typing-indicator">
-              AI 正在输入...
-            </div>
-          </div>
+        {isLoading && messages[messages.length-1]?.role !== 'assistant' && (
+           <div className="text-gray-400 text-sm italic ml-2 animate-pulse">连接中...</div>
         )}
         <div ref={messagesEndRef} />
       </div>
       
-      {/* 仅在有 Action Button 时显示 */}
       {actionButton && (
-        <div className="chat-action-bar">
+        <div className="chat-action-bar p-3 bg-gray-50 border-t border-gray-100">
           <button 
             onClick={actionButton.onClick} 
             disabled={isLoading || actionButton.disabled}
-            className="wizard-btn export-btn"
+            className={`w-full py-2 px-4 rounded-lg font-medium transition-colors ${
+                isLoading || actionButton.disabled 
+                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                : 'bg-green-600 text-white hover:bg-green-700 shadow-sm'
+            }`}
           >
             {actionButton.text}
           </button>
