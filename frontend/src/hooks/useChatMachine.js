@@ -1,23 +1,24 @@
 import { useReducer, useCallback, useEffect, useRef } from 'react';
 import { useStream } from './useStream';
 import { streamEndpoints, generationAPI } from '../api/client';
-import { useTask } from './useTask';
+import { exportToPPTX } from '../utils/pptxExporter';
 
 const initialState = {
   phase: 'outline', 
   messages: [
-    { role: 'system', content: '欢迎！我是 ChatPPT。请输入 PPT 主题（例如：2025年人工智能趋势）。' }
+    { role: 'system', content: '欢迎！请粘贴您的【文本数据】、【报告摘要】或【制作要求】，我将直接为您生成 PPT。' }
   ],
   currentSlides: [], 
   isLoading: false,
   error: null,
   sessionId: '',
+  isRefusal: false,
 };
 
 function chatReducer(state, action) {
   switch (action.type) {
     case 'INIT_SESSION': return { ...state, sessionId: action.payload };
-    case 'SET_LOADING': return { ...state, isLoading: action.payload, error: null };
+    case 'SET_LOADING': return { ...state, isLoading: action.payload, error: null, isRefusal: false };
     case 'SET_ERROR': return { ...state, isLoading: false, error: action.payload };
     case 'ADD_USER_MSG': return { ...state, messages: [...state.messages, { role: 'user', content: action.payload }] };
     case 'ADD_AI_PLACEHOLDER': return { ...state, messages: [...state.messages, { role: 'assistant', content: '' }] };
@@ -27,7 +28,6 @@ function chatReducer(state, action) {
       const lastIndex = msgs.length - 1;
       if (lastIndex >= 0 && msgs[lastIndex].role === 'assistant') {
         const newLastMsg = { ...msgs[lastIndex] };
-        // 安全追加字符串
         newLastMsg.content += String(action.payload || "");
         msgs[lastIndex] = newLastMsg;
       }
@@ -36,6 +36,23 @@ function chatReducer(state, action) {
 
     case 'SET_PHASE': return { ...state, phase: action.payload };
     case 'SET_SLIDES': return { ...state, currentSlides: action.payload };
+    case 'SET_REFUSAL': return { ...state, isRefusal: true, isLoading: false };
+
+    case 'UPDATE_SLIDE': {
+      const { index, field, value, subIndex } = action.payload;
+      const newSlides = [...state.currentSlides];
+      const targetSlide = { ...newSlides[index] };
+      if (subIndex !== undefined && Array.isArray(targetSlide[field])) {
+        const newArray = [...targetSlide[field]];
+        newArray[subIndex] = value;
+        targetSlide[field] = newArray;
+      } else {
+        targetSlide[field] = value;
+      }
+      newSlides[index] = targetSlide;
+      return { ...state, currentSlides: newSlides };
+    }
+
     case 'RESET': return { ...initialState, sessionId: state.sessionId };
     default: return state;
   }
@@ -44,11 +61,13 @@ function chatReducer(state, action) {
 const extractJSON = (rawStr) => {
   if (!rawStr) return null;
   let clean = rawStr.replace(/```json/g, '').replace(/```/g, '').trim();
-  const start = clean.indexOf('{');
-  const end = clean.lastIndexOf('}');
-  if (start !== -1 && end !== -1 && end > start) {
-    return clean.substring(start, end + 1);
-  }
+  const startArr = clean.indexOf('[');
+  const startObj = clean.indexOf('{');
+  let start = -1;
+  if (startArr !== -1 && startObj !== -1) start = Math.min(startArr, startObj);
+  else if (startArr !== -1) start = startArr;
+  else if (startObj !== -1) start = startObj;
+  if (start !== -1) return clean.substring(start);
   return null;
 };
 
@@ -57,7 +76,6 @@ const generateUUID = () => Math.random().toString(36).substring(2) + Date.now().
 export const useChatMachine = () => {
   const [state, dispatch] = useReducer(chatReducer, initialState);
   const { streamRequest, abortStream } = useStream();
-  const { startExportPolling } = useTask();
   const stateRef = useRef(state);
   
   useEffect(() => { stateRef.current = state; }, [state]);
@@ -79,12 +97,15 @@ export const useChatMachine = () => {
     dispatch({ type: 'SET_LOADING', payload: true });
 
     const { phase, sessionId, currentSlides } = stateRef.current;
-    const endpoint = phase === 'outline' ? streamEndpoints.outline : streamEndpoints.content;
+    
+    const endpoint = (phase === 'outline' && currentSlides.length === 0) 
+        ? streamEndpoints.outline 
+        : streamEndpoints.content;
     
     const body = { 
       session_id: sessionId, 
       user_message: text,
-      current_slides: phase === 'content' ? currentSlides : undefined 
+      current_slides: currentSlides.length > 0 ? currentSlides : undefined 
     };
 
     await streamRequest(endpoint, body, {
@@ -93,87 +114,76 @@ export const useChatMachine = () => {
       },
       onDone: () => {
         dispatch({ type: 'SET_LOADING', payload: false });
-        if (stateRef.current.phase === 'content') {
-            const msgs = stateRef.current.messages;
-            const content = msgs[msgs.length - 1].content;
-            try {
-                const cleanJson = extractJSON(content);
-                if (cleanJson) {
-                    const slides = JSON.parse(cleanJson);
-                    if (Array.isArray(slides)) {
-                        dispatch({ type: 'SET_SLIDES', payload: slides });
-                    }
-                }
-            } catch (e) {
-                console.warn("JSON Parse Warning:", e);
+        
+        const msgs = stateRef.current.messages;
+        const lastContent = msgs[msgs.length - 1].content;
+        
+        try {
+            const cleanJson = extractJSON(lastContent);
+            if (!cleanJson) return; 
+            
+            const data = JSON.parse(cleanJson);
+
+            if (data.refusal) {
+                dispatch({ type: 'SET_REFUSAL' });
+                return;
             }
+
+            if (Array.isArray(data)) {
+                dispatch({ type: 'SET_SLIDES', payload: data });
+                dispatch({ type: 'SET_PHASE', payload: 'content' });
+            }
+
+        } catch (e) {
+            console.warn("JSON Parse Warning:", e);
         }
       },
       onError: (err) => {
-        dispatch({ type: 'SET_ERROR', payload: err });
-        dispatch({ type: 'STREAM_UPDATE', payload: `\n[系统错误]: ${err}` });
+        if (err !== 'AbortError') {
+            dispatch({ type: 'SET_ERROR', payload: err });
+        }
       }
     });
 
   }, [streamRequest]);
 
-  const confirmOutline = useCallback(() => {
-    const { messages } = stateRef.current;
-    const lastMsg = messages[messages.length - 1];
-    try {
-      const cleanJson = extractJSON(lastMsg.content);
-      if (!cleanJson) throw new Error("无法识别有效的大纲数据");
-      
-      const data = JSON.parse(cleanJson);
-
-      const initialSlides = [
-        { slide_type: "title", title: data.main_topic, subtitle: data.summary_topic || "" },
-        ...data.outline.map(item => ({
-          slide_type: "two_column",
-          title: item.sub_topic,
-          left_topic: item.topic1, left_content: [],
-          right_topic: item.topic2, right_content: []
-        })),
-        { slide_type: "content", title: "总结", content: ["感谢您的时间"] }
-      ];
-
-      dispatch({ type: 'SET_SLIDES', payload: initialSlides });
-      dispatch({ type: 'SET_PHASE', payload: 'content' });
-      dispatch({ type: 'ADD_USER_MSG', payload: '大纲已确认，正在生成详细内容...' });
-      
-      sendMessage("请为所有页面填充详细的中文内容"); 
-    } catch (e) {
-      console.error(e);
-      dispatch({ type: 'SET_ERROR', payload: "大纲格式错误，请重试。" });
-    }
-  }, [sendMessage]);
-
-  const startExport = useCallback(async () => {
+  const handleExport = useCallback(async () => {
      try {
-        const { currentSlides } = stateRef.current;
         dispatch({ type: 'SET_LOADING', payload: true });
-        
-        const contentJson = {
-            title: currentSlides.find(s => s.slide_type === 'title')?.title || "Presentation",
-            slides_data: currentSlides
-        };
-        
-        const res = await generationAPI.exportPpt(contentJson);
-        const taskId = res.data.task_id;
-        
-        startExportPolling(taskId);
-        
-        dispatch({ type: 'ADD_AI_PLACEHOLDER' });
-        dispatch({ type: 'STREAM_UPDATE', payload: "正在生成 PPT 文件，请稍候..." });
+        const { currentSlides } = stateRef.current;
+        await exportToPPTX(currentSlides); 
         dispatch({ type: 'SET_LOADING', payload: false });
-        
      } catch (e) {
-        dispatch({ type: 'SET_ERROR', payload: "导出失败，请检查网络" });
+        dispatch({ type: 'SET_ERROR', payload: "导出失败: " + e.message });
         dispatch({ type: 'SET_LOADING', payload: false });
      }
-  }, [startExportPolling]);
+  }, []);
+
+  const stopGeneration = useCallback(() => {
+    abortStream();
+    dispatch({ type: 'SET_LOADING', payload: false });
+    dispatch({ type: 'STREAM_UPDATE', payload: "\n[已停止]" });
+  }, [abortStream]);
+
+  const updateSlide = useCallback((index, field, value, subIndex) => {
+    dispatch({ type: 'UPDATE_SLIDE', payload: { index, field, value, subIndex } });
+  }, []);
 
   const reset = useCallback(() => { abortStream(); dispatch({ type: 'RESET' }); }, [abortStream]);
 
-  return { state, actions: { sendMessage, confirmOutline, startExport, reset } };
+  const generateDetails = useCallback(() => {
+      sendMessage("请基于当前结构，丰富并填充详细内容，生成正式的 PPT");
+  }, [sendMessage]);
+
+  return { 
+    state, 
+    actions: { 
+      sendMessage, 
+      handleExport, 
+      reset, 
+      stopGeneration, 
+      updateSlide,
+      generateDetails
+    } 
+  };
 };

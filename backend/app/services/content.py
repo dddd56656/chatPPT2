@@ -15,14 +15,14 @@ except ImportError:
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# [CTO Fix]: 强制中文 + 完整 JSON 返回
-CONTENT_SYSTEM_PROMPT = """You are a content editor. Update the slides JSON based on user instructions.
+CONTENT_SYSTEM_PROMPT = """You are a PPT Editor. 
+Your job is to **MODIFY** or **REFINE** the current slides based on user instructions.
 
-RULES:
-1. **Language**: All content MUST be in **Simplified Chinese (简体中文)**.
-2. **Action**: Return the **FULL updated JSON** array of slides.
-3. **Format**: Raw JSON only.
-4. If the user asks to modify a specific slide, update that slide and return the whole list.
+**RULES**:
+1. **Language**: **Simplified Chinese (简体中文)**.
+2. **Action**: Return the **FULL updated JSON** array.
+3. **Images**: Maintain or update `image_prompt` (English) if content changes significantly.
+4. Keep the structure valid.
 """
 
 class ContentGeneratorV1:
@@ -41,7 +41,7 @@ class ContentGeneratorV1:
 
         prompt = ChatPromptTemplate.from_messages([
             ("system", CONTENT_SYSTEM_PROMPT),
-            ("system", "Current JSON: {current_slides_json}"),
+            ("system", "Current Slides JSON: {current_slides_json}"),
             MessagesPlaceholder(variable_name="history"),
             ("human", "{input}"),
         ])
@@ -61,10 +61,10 @@ class ContentGeneratorV1:
         )
 
     async def generate_content_stream(self, session_id: str, user_input: str, current_slides: List[Dict[str, Any]]) -> AsyncGenerator[str, None]:
-        logger.info(f"[Content Start] Session: {session_id}")
+        logger.info(f"[Refine Start] Session: {session_id}")
         try:
             slides_str = json.dumps(current_slides, ensure_ascii=False)
-            final_input = f"{user_input} (请修改并返回完整的 JSON，使用简体中文)"
+            final_input = f"{user_input} (Return FULL JSON, Chinese)"
             
             async for chunk in self.chain.astream(
                 {
@@ -76,7 +76,7 @@ class ContentGeneratorV1:
                 if chunk.content:
                     yield chunk.content
         except Exception as e:
-            logger.error(f"[Content Error]: {e}", exc_info=True)
+            logger.error(f"[Refine Error]: {e}", exc_info=True)
             yield json.dumps({"error": str(e)})
 
 def create_content_generator():

@@ -5,15 +5,14 @@ import './index.css';
 
 function App() {
   const { state, actions } = useChatMachine();
-  // 增加默认值保护
-  const { messages = [], currentSlides = [], isLoading = false, phase = 'outline', error = null } = state || {};
+  const { messages = [], currentSlides = [], isLoading = false, phase = 'outline', error = null, isRefusal = false } = state || {};
   
   const inputRef = useRef(null);
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isLoading]);
+  }, [messages, isLoading, error]);
 
   const handleSend = (e) => {
     e.preventDefault();
@@ -24,31 +23,52 @@ function App() {
     if(inputRef.current) inputRef.current.value = '';
   };
 
+  const renderMessageContent = (msg) => {
+    const content = msg.content || "";
+    if (msg.role === 'assistant' && content.includes('{')) {
+        if (content.includes('"refusal"')) {
+            try {
+                const match = content.match(/"refusal":\s*"(.*?)"/);
+                if (match) return `[拒绝] ${match[1]}`;
+            } catch(e) {}
+        }
+        if (content.includes('"outline"') || content.includes('"slide_type"')) {
+            return "[系统] 数据已接收，右侧预览已更新。";
+        }
+    }
+    return content;
+  };
+
   const renderActionButton = (msg, index) => {
     const isLast = index === messages.length - 1;
-    // 安全转换 content 为字符串，防止 includes 报错
-    const contentStr = String(msg.content || "");
     
-    if (isLast && msg.role === 'assistant' && phase === 'outline' && contentStr.includes('main_topic')) {
-      return (
-        <div className="action-card">
-          <h4>✅ 大纲已生成</h4>
-          <p style={{fontSize: '0.85rem', color: '#5f6368', margin: '0.5rem 0'}}>
-            请确认大纲，或输入意见进行修改。
-          </p>
-          <button className="action-btn" onClick={actions.confirmOutline}>
-            确认并生成内容 &rarr;
-          </button>
-        </div>
-      );
+    // 大纲阶段
+    if (isLast && msg.role === 'assistant' && phase === 'outline') {
+      if (msg.content?.includes('main_topic')) {
+          return (
+            <div className="action-card">
+              <h4>[完成] 大纲已生成</h4>
+              <p style={{fontSize: '0.85rem', color: '#5f6368', margin: '0.5rem 0'}}>
+                右侧为预览。满意请点击生成，不满意请输入修改意见。
+              </p>
+              <button className="action-btn" onClick={actions.generateDetails}>
+                生成详细 PPT
+              </button>
+            </div>
+          );
+      }
     }
     
+    // 内容阶段
     if (isLast && msg.role === 'assistant' && phase === 'content' && currentSlides.length > 0) {
        return (
         <div className="action-card">
-          <h4>✨ 内容已就绪</h4>
-          <button className="action-btn" onClick={actions.startExport} style={{background: '#188038'}}>
-            下载 PPT 文件 ⬇️
+          <h4>[完成] PPT 制作完成</h4>
+          <p style={{fontSize: '0.85rem', color: '#5f6368', margin: '0.5rem 0'}}>
+            图片已自动配图。所见即所得。
+          </p>
+          <button className="action-btn" onClick={actions.handleExport} style={{background: '#188038'}}>
+            立即导出 PPTX
           </button>
         </div>
        )
@@ -68,9 +88,9 @@ function App() {
           {messages.map((msg, idx) => (
             <div key={idx} className={`message-wrapper ${msg.role}`}>
               <div className={`message ${msg.role}`}>
-                <div className="bubble">
-                  {/* 这里的 || "" 非常重要，防止渲染 undefined */}
-                  {msg.content || (isLoading && idx === messages.length - 1 ? "..." : "")}
+                <div className={`bubble ${msg.role === 'assistant' && isRefusal && idx === messages.length-1 ? 'refusal' : ''}`}>
+                  {renderMessageContent(msg)}
+                  {isLoading && idx === messages.length - 1 && !msg.content && "..."}
                 </div>
               </div>
               {renderActionButton(msg, idx)}
@@ -78,9 +98,7 @@ function App() {
           ))}
           {error && (
              <div className="message-wrapper assistant">
-                <div className="bubble" style={{background: '#ffebee', color: '#c62828'}}>
-                   ❌ 错误: {String(error)}
-                </div>
+                <div className="bubble error">[错误] {String(error)}</div>
              </div>
           )}
           <div ref={messagesEndRef} />
@@ -91,12 +109,14 @@ function App() {
             <input 
               ref={inputRef} 
               type="text" 
-              placeholder={phase === 'outline' ? "输入 PPT 主题..." : "输入修改建议..."} 
+              placeholder={isLoading ? "AI 正在思考..." : "输入修改意见..."} 
               disabled={isLoading} 
             />
-            <button type="submit" className="send-btn" disabled={isLoading}>
-              发送
-            </button>
+            {isLoading ? (
+                <button type="button" className="stop-btn" onClick={actions.stopGeneration} title="停止">Stop</button>
+            ) : (
+                <button type="submit" className="send-btn">Send</button>
+            )}
           </form>
         </div>
       </div>
@@ -104,7 +124,7 @@ function App() {
       {/* Right: Preview */}
       <div className="preview-panel">
         <div className="preview-scroll-container">
-          <PreviewPanel slides={currentSlides} />
+          <PreviewPanel slides={currentSlides} onUpdateSlide={actions.updateSlide} />
         </div>
       </div>
     </div>

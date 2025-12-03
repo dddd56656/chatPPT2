@@ -5,48 +5,34 @@ FastAPI应用主入口文件 - 初始化应用实例和路由配置
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-
-# CTO注：这里的 'router' 来自 app/routers/__init__.py
-# 它聚合了 tasks.py 和 generation.py
 from app.routers import router
 
 # 创建FastAPI应用实例
 app = FastAPI(title=settings.app_name, debug=settings.debug)
 
-# --- [CTO 修复与注释] ---
-# 修复：强化CORS（跨域资源共享）策略。
-# 1. 移除了不安全的 "allow_origins=["*"]"。
-# 2. 明确指定了前端来源 (来自你的原始代码)。
-# 3. 限制了 "allow_headers"，不再使用 "*"
-# -------------------------
+# [CTO Fix]: 完善 CORS 策略，允许前端常用的 3000 端口
 app.add_middleware(
     CORSMiddleware,
-    # 仅允许来自指定的前端地址
     allow_origins=[
-        "http://localhost:5173",  # 假设的前端开发服务器
+        "http://localhost:5173",
         "http://127.0.0.1:5173",
-        # --- 本地开发 (允许 /docs 访问) ---
+        "http://localhost:3000",  # [New] Fix React default port
+        "http://127.0.0.1:3000",  # [New] Fix React default port
         "http://localhost:8000",
         "http://127.0.0.1:8000",
     ],
     allow_credentials=True,
-    # 允许所有标准和非标准的HTTP方法
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    # 仅允许特定的、已知的前端会发送的Header
     allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
 )
 
-# 注册所有API路由，统一添加 /api/v1 前缀
+# 注册所有API路由
 app.include_router(router, prefix="/api/v1")
-
 
 @app.get("/")
 def read_root():
-    """根路径健康检查 (用于外部监控)"""
     return {"status": "healthy", "service": settings.app_name}
-
 
 @app.get("/health")
 def health_check():
-    """健康检查端点 (用于K8s等)"""
     return {"status": "healthy"}

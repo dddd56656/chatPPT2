@@ -15,27 +15,48 @@ except ImportError:
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# [CTO Fix]: 
-# 1. 强制要求 "Simplified Chinese" (简体中文)
-# 2. 使用 {{ }} 转义 JSON 示例，防止 LangChain 报错
-OUTLINE_SYSTEM_PROMPT = """You are a professional presentation architect.
-Please generate a structured PPT outline based on the user's request.
+# [CTO Fix]: 纯净版 Prompt，无 Emoji，确保 Windows 兼容
+OUTLINE_SYSTEM_PROMPT = """You are an expert Data-to-PPT Architect.
 
-RULES:
-1. **Language**: Output MUST be in **Simplified Chinese (简体中文)**.
-2. **Format**: Output RAW JSON only. No markdown formatting.
-3. **Structure**:
-{{
-  "main_topic": "PPT主标题",
-  "outline": [
-    {{
-      "sub_topic": "页面标题",
-      "topic1": "要点1",
-      "topic2": "要点2"
-    }}
-  ],
-  "summary_topic": "总结页标题"
-}}
+**TASK**: 
+Analyze the user's input (Text Data, Report Summary, or Topic) and structure it into a professional Slide Deck.
+
+**CRITICAL RULES**:
+1. **Language**: **Simplified Chinese (简体中文)** ONLY for slide content.
+2. **Action**: 
+   - If input is raw data -> Extract key insights and fill `content`.
+   - If input is a topic -> Generate a logical outline.
+3. **Format**: Output a RAW JSON Array.
+4. **Visuals**: Generate an English `image_prompt` for every slide.
+
+**JSON STRUCTURE (Array)**:
+[
+  {{
+    "slide_type": "title",
+    "title": "主标题",
+    "subtitle": "副标题",
+    "image_prompt": "abstract tech background, blue, 4k"
+  }},
+  {{
+    "slide_type": "content",
+    "title": "页面标题",
+    "content": ["关键点 1", "关键点 2"],
+    "image_prompt": "office meeting, professional"
+  }},
+  {{
+    "slide_type": "two_column",
+    "title": "对比/分析",
+    "left_topic": "现状",
+    "left_content": ["..."], 
+    "right_topic": "未来",
+    "right_content": ["..."],
+    "image_prompt": "growth chart illustration"
+  }}
+]
+
+**REFUSAL**:
+If input is casual chat or unrelated, return:
+{{ "refusal": "[提示] 您好！请直接发送您需要展示的【数据文本】、【报告摘要】或【制作要求】，我来为您生成 PPT。" }}
 """
 
 class OutlineGenerator:
@@ -45,7 +66,7 @@ class OutlineGenerator:
 
         self.llm = ChatOpenAI(
             model="deepseek-chat",
-            temperature=0.3, # 稍微提高温度以获得更好的中文文案
+            temperature=0.1, 
             api_key=settings.deepseek_api_key,
             base_url="https://api.deepseek.com",
             streaming=True,
@@ -73,10 +94,9 @@ class OutlineGenerator:
         )
 
     async def generate_outline_stream(self, session_id: str, user_input: str) -> AsyncGenerator[str, None]:
-        logger.info(f"[Outline Start] Session: {session_id} Input: {user_input}")
+        logger.info(f"[Gen Start] Session: {session_id}")
         try:
-            # 再次强调 JSON 和中文
-            final_input = f"{user_input} (请输出 JSON，使用简体中文)"
+            final_input = f"{user_input} (Output JSON Array, Simplified Chinese)"
             
             async for chunk in self.chain.astream(
                 {"input": final_input},
@@ -85,7 +105,7 @@ class OutlineGenerator:
                 if chunk.content:
                     yield chunk.content
         except Exception as e:
-            logger.error(f"[Outline Error]: {e}", exc_info=True)
+            logger.error(f"[Gen Error]: {e}", exc_info=True)
             yield json.dumps({"error": str(e)})
 
 def create_outline_generator():
