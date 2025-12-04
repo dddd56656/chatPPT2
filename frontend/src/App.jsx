@@ -1,9 +1,9 @@
 import React from 'react';
-import MainLayout from './views/MainLayout';
+import { AppRouter } from './router';
 
+// [CTO Standard] App.jsx 仅作为根组件挂载点
 function App() {
-  return (
-    <MainLayout />
-  );
+  return <AppRouter />;
 }
+
 export default App;
