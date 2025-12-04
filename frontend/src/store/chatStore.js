@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import { streamEndpoints } from '../api/client';
+import { streamEndpoints, ragAPI } from '../api/client';
 import { exportToPPTX } from '../utils/pptxExporter';
 
 const SESSION_PREFIX = 'chatppt_session_';
@@ -12,10 +12,7 @@ const extractJSON = (str) => {
     const startArr = str.indexOf('[');
     const startObj = str.indexOf('{');
     if (startArr === -1 && startObj === -1) return null;
-    let start = -1;
-    if (startArr !== -1 && startObj !== -1) start = Math.min(startArr, startObj);
-    else if (startArr !== -1) start = startArr;
-    else start = startObj;
+    let start = (startArr !== -1 && startObj !== -1) ? Math.min(startArr, startObj) : (startArr !== -1 ? startArr : startObj);
     return str.substring(start).replace(/```json/g, '').replace(/```/g, '').trim();
 };
 
@@ -25,16 +22,13 @@ export const useChatStore = create(
   immer((set, get) => ({
     sessionId: generateUUID(),
     title: '新对话',
-    messages: [{ role: 'system', content: '��� 欢迎！请输入主题、数据或文章，为您生成 PPT。' }],
+    messages: [{ role: 'system', content: '��� 欢迎！请输入主题、数据或文章，为您生成 PPT。' }],
     currentSlides: [],
+    historyList: [],
     phase: 'outline',
     isLoading: false,
-    error: null,
-    isRefusal: false,
-    historyList: [],
-    
-    // [New] 工具面板状态：默认关闭，作为 MCP 工具按需打开
-    isToolOpen: false, 
+    isToolOpen: false,
+    ragStatus: 'idle', 
 
     init: () => {
       try {
@@ -43,37 +37,25 @@ export const useChatStore = create(
       } catch (e) { console.error(e) }
     },
 
-    createNewSession: () => {
-      if (currentController) currentController.abort();
-      set(state => {
-        state.sessionId = generateUUID();
-        state.title = '新对话';
-        state.messages = [{ role: 'system', content: '��� 欢迎！请输入主题、数据或文章，为您生成 PPT。' }];
-        state.currentSlides = [];
-        state.phase = 'outline';
-        state.isLoading = false;
-        state.error = null;
-        state.isRefusal = false;
-        state.isToolOpen = false; // 重置工具状态
-      });
-    },
-
-    loadSession: (sessionId) => {
-        if (currentController) currentController.abort();
+    uploadRAGFile: async (file) => {
+        const { sessionId } = get();
+        set(state => { state.ragStatus = 'uploading'; });
         try {
-            const dataStr = localStorage.getItem(SESSION_PREFIX + sessionId);
-            if (dataStr) {
-                const data = JSON.parse(dataStr);
-                set(state => ({ 
-                    ...state, ...data, sessionId, 
-                    isLoading: false, error: null,
-                    isToolOpen: data.currentSlides?.length > 0 // 如果有内容，自动打开工具
-                }));
-            }
-        } catch (e) {}
+            await ragAPI.uploadFile(file, sessionId);
+            set(state => { 
+                state.ragStatus = 'success';
+                state.messages.push({
+                    role: 'assistant',
+                    content: `��� 文档 **${file.name}** 已加载。请告诉我如何处理它。`
+                });
+            });
+        } catch (e) {
+            set(state => { state.ragStatus = 'error'; });
+            alert(`上传失败: ${e.message}`);
+        } finally {
+            setTimeout(() => set(state => { state.ragStatus = 'idle'; }), 2000);
+        }
     },
-
-    setToolOpen: (isOpen) => set(state => { state.isToolOpen = isOpen }),
 
     sendMessage: async (text) => {
       if (!text.trim()) return;
@@ -84,8 +66,6 @@ export const useChatStore = create(
         state.messages.push({ role: 'user', content: text });
         state.messages.push({ role: 'assistant', content: '' });
         state.isLoading = true;
-        state.error = null;
-        state.isRefusal = false;
       });
 
       if (currentController) currentController.abort();
@@ -95,32 +75,27 @@ export const useChatStore = create(
         ? streamEndpoints.outline 
         : streamEndpoints.content;
 
-      const body = { 
-        session_id: sessionId, 
-        user_message: text,
-        current_slides: currentSlides.length > 0 ? currentSlides : undefined 
-      };
-
       try {
         const response = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+          body: JSON.stringify({ 
+            session_id: sessionId, 
+            user_message: text,
+            current_slides: currentSlides.length > 0 ? currentSlides : undefined 
+          }),
           signal: currentController.signal,
         });
 
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
-        let buffer = '';
 
         while (true) {
           const { value, done } = await reader.read();
           if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n\n');
-          buffer = lines.pop();
-
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n\n');
           for (const line of lines) {
             if (line.startsWith('data: ')) {
               const dataStr = line.slice(6);
@@ -132,14 +107,13 @@ export const useChatStore = create(
                     const lastMsg = state.messages[state.messages.length - 1];
                     lastMsg.content += parsed.text;
                   });
-                } else if (parsed.error) throw new Error(parsed.error);
+                }
               } catch (e) {}
             }
           }
         }
-        get().checkRefusal();
       } catch (err) {
-        if (err.name !== 'AbortError') set(state => { state.error = err.message });
+        if (err.name !== 'AbortError') console.error(err);
       } finally {
         currentController = null;
         set(state => { state.isLoading = false });
@@ -147,15 +121,6 @@ export const useChatStore = create(
       }
     },
 
-    checkRefusal: () => {
-        const msgs = get().messages;
-        const lastContent = msgs[msgs.length - 1].content;
-        if (lastContent.includes('"refusal": true')) {
-            set(state => { state.isRefusal = true });
-        }
-    },
-
-    // 核心：应用数据并打开工具面板
     applyCanvas: (content) => {
         const jsonStr = extractJSON(content);
         if (!jsonStr) { alert("未检测到 PPT 数据"); return; }
@@ -165,23 +130,11 @@ export const useChatStore = create(
                 set(state => { 
                     state.currentSlides = data; 
                     state.phase = 'content';
-                    state.isToolOpen = true; // Auto-open tool
+                    state.isToolOpen = true; 
                 });
                 get().saveSession();
-            } else { alert("数据格式错误"); }
+            }
         } catch (e) { alert("解析失败"); }
-    },
-
-    updateSlide: (index, field, value, subIndex) => {
-      set(state => {
-        const slide = state.currentSlides[index];
-        if (subIndex !== undefined && Array.isArray(slide[field])) {
-          slide[field][subIndex] = value;
-        } else {
-          slide[field] = value;
-        }
-      });
-      get().saveSession();
     },
 
     handleExport: async () => {
@@ -189,72 +142,77 @@ export const useChatStore = create(
             set(state => { state.isLoading = true });
             await exportToPPTX(get().currentSlides);
         } catch (e) {
-            set(state => { state.error = "导出失败: " + e.message });
+            alert("导出失败: " + e.message);
         } finally {
             set(state => { state.isLoading = false });
         }
     },
+
+    setToolOpen: (isOpen) => set(state => { state.isToolOpen = isOpen }),
+    updateSlide: (idx, field, val, subIdx) => {
+        set(state => {
+            const slide = state.currentSlides[idx];
+            if (subIdx !== undefined) slide[field][subIdx] = val;
+            else slide[field] = val;
+        });
+        get().saveSession();
+    },
     
     stopGeneration: () => {
-        if (currentController) {
-            currentController.abort();
-            currentController = null;
-            set(state => { state.isLoading = false; state.messages[state.messages.length - 1].content += "\n[已停止]"; });
-        }
+        if (currentController) currentController.abort();
+        set(state => { state.isLoading = false; });
     },
 
-    // Persistence (Safe Guarded)
-    saveSession: () => {
-        const state = get();
-        if (state.messages.length <= 1 && state.currentSlides.length === 0) return;
-        const sessionData = {
-            sessionId: state.sessionId,
-            title: state.title,
-            messages: state.messages,
-            currentSlides: state.currentSlides,
-            phase: state.phase
-        };
-        localStorage.setItem(SESSION_PREFIX + state.sessionId, JSON.stringify(sessionData));
-        get().syncToLocalStorage();
-    },
-
-    syncToLocalStorage: () => {
-        const state = get();
-        if (state.messages.length <= 1 && state.currentSlides.length === 0) return;
-        const previewText = state.messages.length > 1 ? state.messages[1].content.slice(0, 30) : '空对话';
-        const newItem = { id: state.sessionId, title: state.title, time: Date.now(), preview: previewText };
-        set(s => {
-            const idx = s.historyList.findIndex(item => item.id === state.sessionId);
-            if (idx >= 0) s.historyList[idx] = { ...s.historyList[idx], ...newItem };
-            else s.historyList.unshift(newItem);
-        });
-        localStorage.setItem(INDEX_KEY, JSON.stringify(get().historyList));
-    },
-
-    renameSession: (id, title) => { /* ...Same as before... */
+    createNewSession: () => {
+        if (currentController) currentController.abort();
         set(state => {
-            if (state.sessionId === id) state.title = title;
-            const item = state.historyList.find(i => i.id === id);
-            if (item) item.title = title;
+            state.sessionId = generateUUID();
+            state.title = '新对话';
+            state.messages = [{ role: 'system', content: '��� 欢迎！请输入主题、数据或文章。' }];
+            state.currentSlides = [];
+            state.phase = 'outline';
+            state.isToolOpen = false;
         });
-        get().syncToLocalStorage();
-        try { const s=JSON.parse(localStorage.getItem(SESSION_PREFIX+id)); s.title=title; localStorage.setItem(SESSION_PREFIX+id, JSON.stringify(s)); } catch(e){}
     },
-    deleteSession: (id) => { /* ...Same as before... */
-        if (!window.confirm("确定删除？")) return;
+    
+    loadSession: (id) => {
+        try {
+            const data = JSON.parse(localStorage.getItem(SESSION_PREFIX + id));
+            if (data) set(state => ({ ...state, ...data, sessionId: id, isToolOpen: !!data.currentSlides?.length }));
+        } catch(e) {}
+    },
+
+    saveSession: () => {
+        const s = get();
+        if (s.messages.length <= 1) return;
+        localStorage.setItem(SESSION_PREFIX + s.sessionId, JSON.stringify({
+            title: s.title, messages: s.messages, currentSlides: s.currentSlides, phase: s.phase
+        }));
+        set(state => {
+            const newItem = { id: s.sessionId, title: s.title, time: Date.now() };
+            const idx = state.historyList.findIndex(i => i.id === s.sessionId);
+            if (idx >= 0) state.historyList[idx] = newItem;
+            else state.historyList.unshift(newItem);
+            localStorage.setItem(INDEX_KEY, JSON.stringify(state.historyList));
+        });
+    },
+    
+    deleteSession: (id) => {
         localStorage.removeItem(SESSION_PREFIX + id);
         set(state => {
-            state.historyList = state.historyList.filter(item => item.id !== id);
-            if (state.sessionId === id) {
-                state.sessionId = generateUUID();
-                state.title = '新对话';
-                state.messages = [{ role: 'system', content: '��� 欢迎！请输入主题、数据或文章，为您生成 PPT。' }];
-                state.currentSlides = [];
-                state.phase = 'outline';
-                state.isToolOpen = false;
-            }
+            state.historyList = state.historyList.filter(i => i.id !== id);
+            localStorage.setItem(INDEX_KEY, JSON.stringify(state.historyList));
+            if (state.sessionId === id) get().createNewSession();
         });
-        localStorage.setItem(INDEX_KEY, JSON.stringify(get().historyList));
+    },
+
+    renameSession: (id, newTitle) => {
+        set(state => {
+            if (state.sessionId === id) state.title = newTitle;
+            const item = state.historyList.find(i => i.id === id);
+            if (item) item.title = newTitle;
+            localStorage.setItem(INDEX_KEY, JSON.stringify(state.historyList));
+        });
     }
   }))
 );
