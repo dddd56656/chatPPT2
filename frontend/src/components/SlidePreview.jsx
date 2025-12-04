@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { getSmartImageUrl } from '../utils/smartImage';
 import { Box, CircularProgress, Typography } from '@mui/material';
 
-// 可编辑文本组件 (保持不变)
 const EditableText = ({ value, onChange, className, style, tagName = 'div' }) => {
   const Tag = tagName;
   return (
@@ -29,7 +28,7 @@ const SlideRenderer = ({ slide, index, onUpdate }) => {
     const timer = setTimeout(() => {
         const load = async () => {
             setLoading(true);
-            const url = await getSmartImageUrl(slide.title, 800, 600); 
+            const url = await getSmartImageUrl(slide.title, 800, 600); // 预览用 800x600
             if (active) { setBgImage(url); setLoading(false); }
         };
         load();
@@ -48,7 +47,8 @@ const SlideRenderer = ({ slide, index, onUpdate }) => {
       boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
       marginBottom: '30px', border: '1px solid #eee',
       backgroundImage: bgImage ? `url(${bgImage})` : 'linear-gradient(135deg, #202124 0%, #333 100%)',
-      backgroundSize: 'cover', backgroundPosition: 'center',
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
       transition: 'background-image 0.5s ease',
       display: 'flex', flexDirection: 'column', 
       color: 'white' 
@@ -78,7 +78,7 @@ const SlideRenderer = ({ slide, index, onUpdate }) => {
                 value={slide.title || "Title"} 
                 onChange={(v) => handleChange('title', v)}
                 style={{
-                    fontSize: isTitle ? '2rem' : '1.5rem', // 36pt 对应 2rem 左右
+                    fontSize: isTitle ? '2rem' : '1.5rem', 
                     fontWeight:'bold', 
                     marginBottom: '1rem', 
                     textShadow: strongTextShadow, 
@@ -88,11 +88,11 @@ const SlideRenderer = ({ slide, index, onUpdate }) => {
             
             {/* 副标题 / 列表内容 */}
             {isTitle && slide.subtitle && (
-                <EditableText tagName="p" value={slide.subtitle} onChange={(v) => handleChange('subtitle', v)} style={{fontSize:'1.2rem', textShadow: strongTextShadow}} /> // 20pt 对应 1.2rem 左右
+                <EditableText tagName="p" value={slide.subtitle} onChange={(v) => handleChange('subtitle', v)} style={{fontSize:'1.2rem', textShadow: strongTextShadow}} />
             )}
 
             {!isTitle && (
-                <div style={{fontSize:'0.9rem', lineHeight: 1.8, width:'100%', marginTop:'20px'}}> 
+                <div style={{fontSize:'0.9rem', lineHeight: 1.8, width:'100%', marginTop:'20px'}}>
                     {textContent.map((item, i) => (
                         <div key={i} style={{display:'flex', marginBottom:'8px'}}>
                             <span style={{color:'#1A73E8', marginRight:'12px', fontWeight:'bold', textShadow:'none'}}>•</span>

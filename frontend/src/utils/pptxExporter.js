@@ -1,7 +1,6 @@
 import PptxGenJS from "pptxgenjs";
-import { getSmartImageUrl } from "./smartImage"; // 确保使用智能翻译源
+import { getSmartImageUrl } from "./smartImage"; 
 
-// [CRITICAL FIX]: 健壮的 Base64 下载器 (保持不变)
 const fetchImageToBase64 = async (url) => {
   try {
     const controller = new AbortController();
@@ -34,9 +33,7 @@ const fetchImageToBase64 = async (url) => {
 export const exportToPPTX = async (slides) => {
   if (!slides || slides.length === 0) throw new Error("没有内容可导出");
 
-  // 1. 异步流水线: 翻译 -> 获取URL -> 下载Base64
   const slidesWithImages = await Promise.all(slides.map(async (slide) => {
-    // 请求高清图 (1280x720)
     const imgUrl = await getSmartImageUrl(slide.title, 1280, 720); 
     let base64Data = "";
     if (imgUrl) {
@@ -45,7 +42,7 @@ export const exportToPPTX = async (slides) => {
     return { ...slide, _base64Image: base64Data };
   }));
 
-  // 2. 初始化 PPT
+  // 初始化 PPT
   let PptxGenJS_Lib;
   try {
     const module = await import("pptxgenjs");
@@ -61,10 +58,9 @@ export const exportToPPTX = async (slides) => {
   const BULLET_COLOR = "1A73E8"; 
   const TITLE_SHADOW = { type: 'outer', color: '000000', blur: 5, opacity: 0.8, offset: 0 }; 
 
-  // [FIX]: 移除 autofit: true，依赖手动设置的 w/h，增强稳定性
+  // [REPAIR FIX]: 移除 autofit，依赖手动设置的 w/h。
   const textBaseOpts = { color: TEXT_COLOR, shadow: TITLE_SHADOW, isTextBox: true, valign: "top" }; 
 
-  // 3. 构建页面 (Immersive Floating Text Layout)
   slidesWithImages.forEach((slide) => {
     const slidePage = pptx.addSlide();
     const bgData = slide._base64Image;
@@ -74,7 +70,7 @@ export const exportToPPTX = async (slides) => {
         slidePage.addImage({ data: bgData, x: 0, y: 0, w: "100%", h: "100%" });
         slidePage.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: "100%", h: "100%", fill: { color: "000000", transparency: 85 } });
     } else {
-        slidePage.background = { color: "202124" };
+        slidePage.background = { color: "202124" }; 
     }
 
     // --- 浮动文字层 ---
@@ -82,19 +78,19 @@ export const exportToPPTX = async (slides) => {
     // 标题 (居中大字)
     if (slide.slide_type === "title") {
         slidePage.addText(slide.title || "Presentation", { 
-            x: "5%", y: "45%", w: "90%", h: 1, // H 减小以适应小字
+            x: "5%", y: "45%", w: "90%", h: 1, // 36pt
             fontSize: 36, color: TEXT_COLOR, bold: true, align: "center", shadow: TITLE_SHADOW, ...textBaseOpts
         });
         if (slide.subtitle) slidePage.addText(slide.subtitle, { 
-            x: "10%", y: "60%", w: "80%", h: 0.5, // H 减小
+            x: "10%", y: "60%", w: "80%", h: 0.5, // 20pt
             fontSize: 20, color: TEXT_COLOR, align: "center", shadow: TITLE_SHADOW, ...textBaseOpts
         });
     } 
-    // 内容/双栏 (左上对齐)
+    // 内容/双栏
     else {
         // 标题
         slidePage.addText(slide.title || "Untitled", { 
-            x: 0.5, y: 0.4, w: "90%", h: 0.6, // H 减小
+            x: 0.5, y: 0.4, w: "90%", h: 0.6, 
             fontSize: 28, color: TEXT_COLOR, bold: true, shadow: TITLE_SHADOW, ...textBaseOpts, valign: "middle"
         });
 
@@ -110,8 +106,9 @@ export const exportToPPTX = async (slides) => {
                 text: l, 
                 options: { bullet: { code: '2022', color: BULLET_COLOR }, ...textBaseOpts } 
             })), { 
-                x: contentX, y: 1.5, w: contentW, h: 5.5, fontSize: 16, lineSpacing: 28 
-            }); // Font Size 16 and H is sufficient
+                x: contentX, y: 1.5, w: contentW, h: 5.8, // [FINAL FIX]: H 增加到 5.8，提供安全边际
+                fontSize: 16, lineSpacing: 28 
+            }); 
         }
     }
   });
