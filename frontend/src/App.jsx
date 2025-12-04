@@ -1,7 +1,7 @@
 import React from 'react';
-import { AppRouter } from './router';
+// [CTO Note] 现在从独立的 routes 模块导入，结构更清晰
+import { AppRouter } from './routes';
 
-// [CTO Standard] App.jsx 仅作为根组件挂载点
 function App() {
   return <AppRouter />;
 }
