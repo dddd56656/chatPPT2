@@ -2,10 +2,10 @@ import React, { Suspense, lazy } from 'react';
 import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom';
 import { Box, CircularProgress } from '@mui/material';
 
-// 懒加载视图 (Code Splitting)
-const MainLayout = lazy(() => import('./views/MainLayout'));
-const LoginView = lazy(() => import('./views/LoginView'));
-const NotFoundView = lazy(() => import('./views/NotFoundView'));
+// [CTO Fix]: 使用 '../' 跳出 routes 目录，访问同级的 views 目录
+const MainLayout = lazy(() => import('../views/MainLayout'));
+const LoginView = lazy(() => import('../views/LoginView'));
+const NotFoundView = lazy(() => import('../views/NotFoundView'));
 
 // Loading 组件
 const PageLoader = () => (
@@ -14,7 +14,6 @@ const PageLoader = () => (
   </Box>
 );
 
-// 路由表定义
 const router = createBrowserRouter([
   {
     path: "/",
@@ -34,7 +33,6 @@ const router = createBrowserRouter([
   }
 ]);
 
-// 导出路由提供者组件
 export const AppRouter = () => (
   <Suspense fallback={<PageLoader />}>
     <RouterProvider router={router} />
