@@ -1,12 +1,10 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { 
   Box, Paper, Typography, TextField, IconButton, 
-  InputAdornment, Tooltip, CircularProgress, Button, 
-  Menu, MenuItem 
+  InputAdornment, Tooltip, CircularProgress, Button 
 } from '@mui/material';
 import { 
-  Send, Stop, AttachFile, AutoAwesome, Slideshow, 
-  Build as ToolIcon, Download 
+  Send, Stop, AttachFile, AutoAwesome, Slideshow 
 } from '@mui/icons-material';
 import { useChatStore } from '../store/chatStore';
 
@@ -14,14 +12,12 @@ const ChatArea = () => {
   const { 
     messages, isLoading, ragStatus, 
     sendMessage, uploadRAGFile, applyCanvas, 
-    setToolOpen, stopGeneration, handleExport 
+    setToolOpen, stopGeneration 
   } = useChatStore();
 
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const textInputRef = useRef(null);
-  const [anchorEl, setAnchorEl] = useState(null);
-  const openTools = Boolean(anchorEl);
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, isLoading]);
 
@@ -44,7 +40,7 @@ const ChatArea = () => {
   return (
     <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', maxWidth: '900px', mx: 'auto', width: '100%' }}>
       
-      {/* 1. 消息列表 */}
+      {/* 消息列表 */}
       <Box sx={{ flex: 1, overflowY: 'auto', p: 2, display: 'flex', flexDirection: 'column', gap: 3 }}>
         {messages.map((msg, idx) => (
           <Box key={idx} sx={{ display: 'flex', flexDirection: 'column', alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
@@ -59,6 +55,7 @@ const ChatArea = () => {
                     <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
                         {msg.content || (isLoading && idx === messages.length-1 ? "Thinking..." : "")}
                     </Typography>
+                    {/* [Entry Point] 唯一的 Render PPT 入口 */}
                     {msg.role === 'assistant' && hasSlideData(msg.content) && (
                         <Button 
                             variant="outlined" size="small" startIcon={<Slideshow />} 
@@ -76,38 +73,13 @@ const ChatArea = () => {
         <div ref={messagesEndRef} />
       </Box>
 
-      {/* 2. 底部控制区 */}
+      {/* 底部输入区 (无 Tools) */}
       <Box sx={{ p: 3, bgcolor: '#343541' }}>
-        
-        {/* Tools Menu */}
-        <Box sx={{ display: 'flex', justifyContent: 'flex-start', mb: 1.5 }}>
-            <Tooltip title="Tools">
-                <IconButton size="small" onClick={(e) => setAnchorEl(e.currentTarget)} sx={{ color: '#acacbe', '&:hover':{color:'white', bgcolor:'rgba(255,255,255,0.1)'}, p: '6px 12px', borderRadius: 2 }}>
-                    <ToolIcon fontSize="small" /> <Typography variant="caption" sx={{ml:0.5, fontWeight:'bold'}}>Tools</Typography>
-                </IconButton>
-            </Tooltip>
-            <Menu 
-                anchorEl={anchorEl} open={openTools} onClose={() => setAnchorEl(null)} 
-                PaperProps={{ sx: { bgcolor: '#202123', color: 'white', border: '1px solid #444' } }}
-            >
-                <MenuItem onClick={() => { setToolOpen(true); setAnchorEl(null); }} sx={{fontSize:'0.9rem'}}>
-                    <Slideshow sx={{mr:1, fontSize:18, color: '#10a37f'}}/> Open Canvas
-                </MenuItem>
-                <MenuItem onClick={() => { handleExport(); setAnchorEl(null); }} sx={{fontSize:'0.9rem'}}>
-                    <Download sx={{mr:1, fontSize:18}}/> Export PPTX
-                </MenuItem>
-            </Menu>
-        </Box>
-
-        {/* Input Box (Flexbox Layout) */}
         <Box component="form" onSubmit={handleSend} sx={{ 
-            display: 'flex',            
-            alignItems: 'center',       // [CTO Fix]: 垂直居中对齐 (Vertical Center)
-            bgcolor: '#40414f', 
-            borderRadius: 3, 
+            display: 'flex', alignItems: 'center', 
+            bgcolor: '#40414f', borderRadius: 3, 
             boxShadow: '0 0 15px rgba(0,0,0,0.1)', 
-            border: '1px solid rgba(255,255,255,0.1)',
-            p: 1.5                      
+            border: '1px solid rgba(255,255,255,0.1)', p: 1.5 
         }}>
             <TextField
                 fullWidth multiline maxRows={4}
@@ -134,8 +106,6 @@ const ChatArea = () => {
                 }}
                 sx={{ flex: 1, '& .MuiInputBase-input': { color: 'white', p: 0.5 } }}
             />
-            
-            {/* 发送按钮容器 */}
             <Box sx={{ ml: 1 }}> 
                 {isLoading ? (
                     <IconButton onClick={stopGeneration} sx={{ color: '#ececf1', p: 0.5 }}><Stop /></IconButton>
@@ -146,7 +116,6 @@ const ChatArea = () => {
                 )}
             </Box>
         </Box>
-        
         <Typography variant="caption" align="center" display="block" sx={{ mt: 1, color: '#9a9a9a' }}>
             ChatPPT can make mistakes.
         </Typography>
