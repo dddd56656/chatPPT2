@@ -1,141 +1,93 @@
-# ChatPPT - AI驱动的智能演示文稿生成器
 
-一个基于FastAPI后端和React前端的现代化PPT生成系统，采用Monorepo架构设计。
+# ChatPPT - AI 智能演示文稿生成系统
 
-## 🚀 功能特性
+ChatPPT 是一个基于 **RAG (检索增强生成)** 和 **LLM (大语言模型)** 的现代化全栈应用。它采用 Monorepo 架构，实现了从自然语言/文档上传到 PPTX 文件的端到端生成。
 
-- **智能生成**: 基于多Agent协作自动生成大纲、内容和设计
-- **异步处理**: 使用Celery和Redis实现任务队列和异步处理
-- **现代化架构**: 前后端分离，支持容器化部署
-- **专业输出**: 生成标准PPTX格式的专业演示文稿
-- **实时监控**: 前端实时显示任务进度和状态
-- **谷歌标准UI**: 前端界面遵循Material Design指南，提供一致且可访问的用户体验
 
-## 📁 项目结构
 
-```
-chatPPT/
-├── backend/                    # FastAPI后端服务
-│   ├── app/                   # 应用核心模块
-│   ├── templates/             # 模板文件
-│   └── output/                # 生成文件输出目录
-├── frontend/                  # React前端应用
-│   └── src/                   # 前端源代码
-├── docker-compose.yml         # 容器编排配置
-└── README.md                  # 项目说明文档
-```
+## 📋 核心架构 (Architecture)
 
-## 🛠️ 快速开始
+项目采用标准的**前后端分离**架构：
 
-### 使用Docker Compose（推荐）
+* **Frontend**: React + Vite + MUI + Zustand (Store-Driven UI) + React Router (Client-side Routing)
+* **Backend**: Python FastAPI + LangChain + Celery (异步任务队列)
+* **Infrastructure**: Redis (消息代理与缓存)
 
+
+
+## 🛠️ 前置依赖 (Prerequisites)
+
+在启动项目前，请确保您的环境已安装以下服务：
+
+1.  **Node.js**: v18+ (推荐使用 LTS 版本)
+2.  **Python**: v3.10+
+3.  **Redis**: **(必须)** 用于 Celery 任务队列和 Session 存储。
+
+### ⚡ 快速安装 Redis (如果尚未安装)
+
+如果您有 Docker，这是最快的方式：
 ```bash
-# 一键启动所有服务
-docker-compose up -d
+docker run -d -p 6379:6379 --name chatppt-redis redis:alpine
+````
 
-# 访问应用
-# 前端: http://localhost:3000
-# 后端API: http://localhost:8000
-# API文档: http://localhost:8000/docs
-```
+如果您使用 Windows 且没有 Docker，请下载 Redis Windows 版并确保服务已启动。
 
-### 手动安装
+--
 
-#### 1. 后端服务
+## 🚀 启动指南 (Development Setup)
 
-```bash
-cd backend
+请分别打开三个终端窗口，按照以下顺序启动服务。
 
-# 使用uv安装依赖（推荐）
-uv sync
+### 第一步：后端服务 (Backend API)
 
-# 或者使用pip安装依赖
-pip install -r requirements.txt
+1.  **进入目录 & 配置环境**
 
-# 启动FastAPI服务器
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
+    ```bash
+    cd backend
 
-#### 2. Celery Worker（异步任务处理）
+    # 复制环境配置文件 (如果没有，请新建并填入您的 DeepSeek API Key)
+    cp .env.example .env 
+    # 或者手动创建 .env 文件，内容如下：
+    # DEEPSEEK_API_KEY=sk-xxxxxx
+    # REDIS_URL=redis://localhost:6379/0
+    # CELERY_BROKER_URL=redis://localhost:6379/0
+    ```
 
-**Windows开发环境**：
-```bash
-cd backend
-uv run celery -A app.worker.tasks worker --loglevel=info --pool=solo
-```
+2.  **安装依赖**
 
-**Linux/macOS开发环境**：
-```bash
-cd backend
-uv run celery -A app.worker.tasks worker --loglevel=info
-```
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-**生产环境**：
-```bash
-cd backend
-celery -A app.worker.tasks worker --concurrency=4 --loglevel=info
-```
+3.  **启动 API 服务器**
 
-#### 3. 前端服务
+    ```bash
+    uvicorn app.main:app --reload --port 8000
+    ```
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
+    *API 文档地址: http://localhost:8000/docs*
 
-#### 4. 一键启动（Windows）
 
-使用提供的启动脚本：
-```bash
-start_dev.bat
-```
 
-## 🔧 开发指南
+### 第二步：前端应用 (Frontend)
 
-### 环境要求
+1.  **进入目录**
 
-- Python 3.8+
-- Node.js 16+
-- Redis 6+
-- Docker & Docker Compose（可选）
+    ```bash
+    cd frontend
+    ```
 
-### 核心架构
+2.  **安装依赖**
 
-- **后端**: FastAPI + Celery + Redis
-- **前端**: React + Vite + Axios + Tailwind CSS
-- **任务队列**: Celery用于异步PPT生成
-- **存储**: Redis用于任务状态管理
-- **AI集成**: DeepSeek API via LangChain
+    ```bash
+    npm install
+    ```
 
-### 平台兼容性说明
+3.  **启动开发服务器**
 
-- **Windows**: 开发环境需要使用`--pool=solo`参数启动Celery
-- **Linux/macOS**: 支持标准Celery配置，性能最佳
-- **生产环境**: 建议部署到Linux服务器，使用多进程模式
+    ```bash
+    npm run dev
+    ```
 
-## 📚 API文档
+    *访问地址: http://localhost:3000* (端口可能因占用而变动，请查看终端输出)
 
-启动后端服务后访问：
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
-
-### 主要API端点
-
-- `POST /api/v1/stream/outline` - 流式生成PPT大纲 (Server-Sent Events)
-- `POST /api/v1/stream/content` - 流式生成PPT内容 (Server-Sent Events)
-- `POST /api/v1/generation/export` - 提交PPT导出任务
-- `GET /api/v1/tasks/{task_id}` - 获取任务状态
-- `GET /api/v1/tasks/{task_id}/file` - 下载生成的PPT文件
-
-## 🤝 贡献指南
-
-请查看[CONTRIBUTING.md](CONTRIBUTING.md)了解如何为项目做出贡献。
-
-## 📄 许可证
-
-本项目采用MIT许可证 - 查看[LICENSE](LICENSE)文件了解详情。
-
-## 🐛 问题报告
-
-如有问题或建议，请通过GitHub Issues联系我们。
