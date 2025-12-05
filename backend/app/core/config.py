@@ -1,10 +1,10 @@
 """
-应用配置管理文件 - Google Standard Refactor (保留文件I/O字段)
+应用配置管理文件 - Google Standard Refactor (CORS Enabled)
 """
 import os
 from dotenv import load_dotenv
 
-# 健壮的路径回溯
+# 修正：.env 在 backend 目录下
 env_path = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
 load_dotenv(env_path)
 
@@ -14,33 +14,23 @@ except ImportError:
     from pydantic import BaseSettings
 
 class Settings(BaseSettings):
-    """
-    应用配置类 
-    """
-    # 应用配置
     app_name: str = "chatppt"
     debug: bool = False
     
-    # [FIXED] Redis配置: 使用 Docker Service Name
-    redis_url: str = "redis://redis:6379/0" 
+    # [New] CORS 配置：允许的跨域来源 (逗号分隔)
+    cors_origins: str = "http://localhost,http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:3000"
 
-    # [Restored] 文件路径配置 (保留本地文件 I/O)
+    redis_url: str = "redis://redis:6379/0" 
     output_dir: str = "./output"
     template_dir: str = "./templates"
     upload_dir: str = "./uploads"
     
-    # [Generative AI]
     deepseek_api_key: str = ""
-
-    # [RAG Core] 本地化 RAG 配置
     embedding_model_name: str = "moka-ai/m3e-base"
-    # [FIXED] Milvus配置: 使用 Docker Service Name
     milvus_host: str = "milvus" 
     milvus_port: str = "19530"
     milvus_collection: str = "chatppt_rag_v1"
     
-    # 注意：Celery 相关的字段（celery_broker_url 等）已从模型中删除。
-
     class Config:
         case_sensitive = False
         env_file = ".env"

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { streamEndpoints, ragAPI } from '../api/client';
 import { exportToPPTX } from '../utils/pptxExporter';
+import { splitSlides } from '../utils/slideSplitter'; // [New Import]
 
 const SESSION_PREFIX = 'chatppt_session_';
 const INDEX_KEY = 'chatppt_history_index';
@@ -22,7 +23,7 @@ export const useChatStore = create(
   immer((set, get) => ({
     sessionId: generateUUID(),
     title: '新对话',
-    messages: [{ role: 'system', content: '👋 欢迎！请输入主题、数据或文章，为您生成 PPT。' }],
+    messages: [{ role: 'system', content: '��� 欢迎！请输入主题、数据或文章，为您生成 PPT。' }],
     currentSlides: [],
     historyList: [],
     phase: 'outline',
@@ -30,7 +31,6 @@ export const useChatStore = create(
     isToolOpen: false,
     ragStatus: 'idle',
     ragFiles: [], 
-    // [New] 已勾选的文件 ID 集合
     selectedRagFileIds: [], 
 
     init: () => {
@@ -40,14 +40,13 @@ export const useChatStore = create(
       } catch (e) { console.error(e) }
     },
 
-    // [New Action] 切换文件勾选状态
     toggleRagFileSelection: (fileId) => {
         set(state => {
             const index = state.selectedRagFileIds.indexOf(fileId);
             if (index > -1) {
-                state.selectedRagFileIds.splice(index, 1); // 取消勾选
+                state.selectedRagFileIds.splice(index, 1);
             } else {
-                state.selectedRagFileIds.push(fileId); // 勾选
+                state.selectedRagFileIds.push(fileId);
             }
         });
     },
@@ -57,25 +56,18 @@ export const useChatStore = create(
       set(state => { state.ragStatus = 'uploading'; });
       try {
         await ragAPI.uploadFile(file, sessionId);
-        
-        // 刷新列表
         await get().fetchRagFiles();
-        
         set(state => {
           state.ragStatus = 'success';
-          // [UX] 上传成功后，自动默认勾选最新上传的文件
-          // 找到刚上传的文件（假设是列表第一个，因为后端按时间倒序）
           const newFile = state.ragFiles[0]; 
           if(newFile && !state.selectedRagFileIds.includes(newFile.id)) {
               state.selectedRagFileIds.push(newFile.id);
           }
-          
           state.messages.push({
             role: 'assistant',
-            content: `📄 文档 **${file.name}** 已上传并选中。`
+            content: `��� 文档 **${file.name}** 已上传并选中。`
           });
         });
-
       } catch (e) {
         set(state => { state.ragStatus = 'error'; });
         alert(`上传失败: ${e.message}`);
@@ -91,8 +83,6 @@ export const useChatStore = create(
         const files = await ragAPI.listFiles(sessionId);
         set(state => { 
             state.ragFiles = files; 
-            // [Optional] 如果是初次加载，可以保留之前的选中状态，或者全选？
-            // 这里保持用户之前的选中状态，如果文件被删除了，过滤掉
             state.selectedRagFileIds = state.selectedRagFileIds.filter(id => files.find(f => f.id === id));
         });
       } catch (e) { console.error(e); }
@@ -102,7 +92,6 @@ export const useChatStore = create(
       const previousFiles = get().ragFiles;
       set(state => {
         state.ragFiles = state.ragFiles.filter(f => f.id !== fileId);
-        // 删除时同时也取消勾选
         state.selectedRagFileIds = state.selectedRagFileIds.filter(id => id !== fileId);
       });
       try {
@@ -115,7 +104,6 @@ export const useChatStore = create(
 
     sendMessage: async (text) => {
       if (!text.trim()) return;
-      // [Modified] 获取 selectedRagFileIds
       const { sessionId, phase, currentSlides, selectedRagFileIds } = get();
 
       set(state => {
@@ -140,7 +128,6 @@ export const useChatStore = create(
             session_id: sessionId,
             user_message: text,
             current_slides: currentSlides.length > 0 ? currentSlides : undefined,
-            // [Critical Fix] 只发送用户勾选的文件 ID
             rag_file_ids: selectedRagFileIds.length > 0 ? selectedRagFileIds : undefined
           }),
           signal: currentController.signal,
@@ -180,15 +167,18 @@ export const useChatStore = create(
       }
     },
 
-    // ... (applyCanvas, handleExport, updateSlide, etc. 保持不变)
+    // [Critical Fix]: 在这里应用分页逻辑
     applyCanvas: (content) => {
       const jsonStr = extractJSON(content);
       if (!jsonStr) { alert("未检测到 PPT 数据"); return; }
       try {
-        const data = JSON.parse(jsonStr);
-        if (Array.isArray(data)) {
+        const rawData = JSON.parse(jsonStr);
+        if (Array.isArray(rawData)) {
+          // [Logic]: 调用工具函数，将长 slide 拆分
+          const processedSlides = splitSlides(rawData);
+          
           set(state => {
-            state.currentSlides = data;
+            state.currentSlides = processedSlides;
             state.phase = 'content';
             state.isToolOpen = true;
           });
@@ -200,6 +190,7 @@ export const useChatStore = create(
     handleExport: async () => {
       try {
         set(state => { state.isLoading = true });
+        // 因为 currentSlides 已经是分页过的了，直接导出即可
         await exportToPPTX(get().currentSlides);
       } catch (e) {
         alert("导出失败: " + e.message);
@@ -228,12 +219,12 @@ export const useChatStore = create(
       set(state => {
         state.sessionId = generateUUID();
         state.title = '新对话';
-        state.messages = [{ role: 'system', content: '👋 欢迎！请输入主题、数据或文章。' }];
+        state.messages = [{ role: 'system', content: '��� 欢迎！请输入主题、数据或文章。' }];
         state.currentSlides = [];
         state.phase = 'outline';
         state.isToolOpen = false;
-        state.ragFiles = []; // 清空文件列表
-        state.selectedRagFileIds = []; // 清空勾选
+        state.ragFiles = []; 
+        state.selectedRagFileIds = [];
       });
     },
 
