@@ -16,39 +16,39 @@ except ImportError:
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# [CTO Fix]: 优化 System Prompt，增加对 RAG 场景的豁免逻辑
+# [CTO Fix]: LangChain Template 语法修正
+# 注意：JSON 示例中的大括号必须双写 {{...}} 才能被识别为纯文本，否则会被当做变量
 OUTLINE_SYSTEM_PROMPT = """You are an expert Data-to-PPT Architect.
 
 **TASK**: 
-Analyze the user's input AND the provided [Knowledge Base Context] to structure a professional Slide Deck.
+Analyze the user's input. 
+- If [Knowledge Base Context] is provided, YOU MUST use it as the primary source.
+- If NO context is provided, generate content based on your own knowledge.
 
 **CRITICAL RULES**:
-1. **Language**: **Simplified Chinese (简体中文)** ONLY for slide content.
-2. **Context Priority**: 
-   - IF [Knowledge Base Context] is provided, YOU MUST USE IT to generate the outline. DO NOT REFUSE.
-   - Treat the context as the "Raw Data".
-3. **Format**: Output a RAW JSON Array.
-4. **Visuals**: Generate an English `image_prompt` for every slide.
+1. **Language**: **Simplified Chinese** ONLY for slide content.
+2. **Format**: Output a RAW JSON Array.
+3. **Visuals**: Generate an English `image_prompt` for every slide.
 
 **JSON STRUCTURE (Array)**:
 [
   {{
     "slide_type": "title",
-    "title": "主标题",
-    "subtitle": "副标题",
-    "image_prompt": "abstract tech background, blue, 4k"
+    "title": "Main Title",
+    "subtitle": "Subtitle",
+    "image_prompt": "abstract tech background"
   }},
   {{
     "slide_type": "content",
-    "title": "页面标题",
-    "content": ["关键点 1", "关键点 2"],
-    "image_prompt": "office meeting, professional"
+    "title": "Slide Title",
+    "content": ["Point 1", "Point 2"],
+    "image_prompt": "office meeting"
   }}
 ]
 
 **REFUSAL POLICY**:
-- If NO context is provided AND input is casual chat (e.g., "Hello"), return: {{ "refusal": "..." }}
-- **EXCEPTION**: If [Knowledge Base Context] IS PRESENT, NEVER REFUSE. Generate a summary PPT based on that context.
+- If input is empty or just "Hello", return: {{ "refusal": "Please provide a topic." }}
+- Otherwise, ALWAYS generate the JSON structure.
 """
 
 class OutlineGenerator:
@@ -88,35 +88,41 @@ class OutlineGenerator:
     async def generate_outline_stream(self, session_id: str, user_input: str, rag_file_ids: list = None) -> AsyncGenerator[str, None]:
         logger.info(f"[Gen Start] Session: {session_id}")
         
-        # 1. RAG 检索逻辑
         context_str = ""
-        # [CTO Optimization]: 如果用户指令太短（如"生成PPT"），可能会导致检索失效。
-        # 策略：如果指令短且有文件，我们追加一个隐式查询 "Summary key points" 以提高检索质量
-        search_query = user_input
-        if len(user_input) < 10 and rag_file_ids:
-            search_query = f"{user_input} summary key points main content"
-            logger.info(f"Query Augmented for RAG: {search_query}")
-
-        if rag_file_ids:
-            logger.info(f"RAG Activated: Retrieving context for session {session_id}")
-            context_str = rag_service.search_context(search_query, session_id)
-
-        # 2. 构造最终输入
-        final_input = f"{user_input} (Output JSON Array, Simplified Chinese)"
         
+        # --- Logic Branch 1: RAG Mode ---
+        if rag_file_ids:
+            logger.info(f"RAG Active: {len(rag_file_ids)} files selected.")
+            
+            search_query = user_input
+            if len(user_input) < 10: 
+                search_query = "Summary key points main content"
+            
+            context_str = rag_service.search_context(search_query, session_id)
+            
+            if not context_str:
+                logger.warning("Semantic search empty. Fallback to file preview.")
+                context_str = rag_service.fetch_file_preview(rag_file_ids)
+
+        # --- Logic Branch 2: Construct Final Prompt ---
+        # 注意：这里的 f-string 是 Python 层的变量替换，不需要双大括号
         if context_str:
-            # [Critical Injection]: 强力注入上下文
-            rag_prefix = f"""
+            final_input = f"""
             === [Knowledge Base Context] START ===
             {context_str}
             === [Knowledge Base Context] END ===
             
-            Instruction: Based on the [Knowledge Base Context] above, generate a comprehensive PPT outline about the content.
+            User Request: {user_input}
+            Instruction: Generate a PPT outline based on the [Knowledge Base Context] above. Use Simplified Chinese.
             """
-            final_input = rag_prefix + final_input
-            logger.info("Context successfully injected into prompt.")
+            logger.info("Mode: RAG Generation")
+        else:
+            final_input = f"""
+            User Request: {user_input}
+            Instruction: Generate a professional PPT outline based on this topic. Use Simplified Chinese. Output JSON Array.
+            """
+            logger.info("Mode: Direct Generation")
         
-        # ... (rest is same)
         try:
             async for chunk in self.chain.astream(
                 {"input": final_input},
