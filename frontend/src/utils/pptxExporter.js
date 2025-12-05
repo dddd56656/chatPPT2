@@ -3,14 +3,23 @@ import { getSmartImageUrl } from "./smartImage";
 
 // [CONFIG] 宽屏布局参数 (13.33 x 7.5 inch)
 const LAYOUT = {
-    MARGIN_X: 0.7,      // 左边距 (英寸)
-    CONTENT_W: "90%",   // 内容宽
-    TITLE_Y: 0.4,       // 标题纵坐标
-    BODY_Y: 1.2,        // 正文纵坐标 (留出更多顶部呼吸空间)
-    BODY_H: 5.8,        // 内容高度 (7.5 - 1.2 - 0.5 = ~5.8 安全区域)
-    FONT_TITLE: 28,     // 标题字号 (大屏可以稍微大一点)
-    FONT_BODY: 16,      // 正文字号 (16pt 在宽屏上清晰且能容纳)
-    LINE_SPACING: 24    // 行间距 (舒适阅读)
+    MARGIN_X: 0.7,      
+    CONTENT_W: "90%",   
+    TITLE_Y: 0.4,       
+    BODY_Y: 1.2,        
+    BODY_H: 5.8,        
+    FONT_TITLE: 28,     
+    FONT_BODY: 16,      
+    LINE_SPACING: 24    
+};
+
+// [CTO Fix]: 文本清洗工具 - 移除不可见的 XML 非法字符
+// 这是解决 "PPT无法读取" 问题的核心
+const sanitizeText = (str) => {
+    if (!str) return "";
+    // 移除 ASCII 控制字符 (0-8, 11-12, 14-31)，保留换行符(\n)和制表符(\t)
+    // 这种字符通常是 LLM 生成时的幻觉噪音
+    return String(str).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
 };
 
 const fetchImageToBase64 = async (url) => {
@@ -60,10 +69,9 @@ export const exportToPPTX = async (slides) => {
   }
   const pptx = new PptxGenJS_Lib();
   
-  // [CRITICAL CHANGE] 使用宽屏模式 (13.33 x 7.5 inches)
   pptx.layout = "LAYOUT_WIDE"; 
-  
-  pptx.title = slides[0]?.title || "Presentation";
+  // [CTO Fix] 清洗标题
+  pptx.title = sanitizeText(slides[0]?.title || "Presentation");
 
   const TEXT_COLOR = "FFFFFF"; 
   const BULLET_COLOR = "1A73E8"; 
@@ -75,7 +83,6 @@ export const exportToPPTX = async (slides) => {
     const slidePage = pptx.addSlide();
     const bgData = slide._base64Image;
 
-    // 背景
     if (bgData) {
         slidePage.addImage({ data: bgData, x: 0, y: 0, w: "100%", h: "100%" });
         slidePage.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: "100%", h: "100%", fill: { color: "000000", transparency: 40 } });
@@ -83,36 +90,33 @@ export const exportToPPTX = async (slides) => {
         slidePage.background = { color: "202124" }; 
     }
 
-    // 标题页
+    // [CTO Fix] 全面应用 sanitizeText
     if (slide.slide_type === "title") {
-        slidePage.addText(slide.title || "Presentation", { 
+        slidePage.addText(sanitizeText(slide.title || "Presentation"), { 
             x: 0.5, y: "40%", w: "90%", h: 1.5, 
-            fontSize: 44, // 宽屏大标题
+            fontSize: 44, 
             color: TEXT_COLOR, bold: true, align: "center", shadow: TEXT_SHADOW, ...textBaseOpts
         });
-        if (slide.subtitle) slidePage.addText(slide.subtitle, { 
+        if (slide.subtitle) slidePage.addText(sanitizeText(slide.subtitle), { 
             x: 0.5, y: "60%", w: "90%", h: 1, 
             fontSize: 24, 
             color: TEXT_COLOR, align: "center", shadow: TEXT_SHADOW, ...textBaseOpts
         });
     } 
-    // 内容页
     else {
-        // 页面标题
-        slidePage.addText(slide.title || "Untitled", { 
+        slidePage.addText(sanitizeText(slide.title || "Untitled"), { 
             x: LAYOUT.MARGIN_X, y: LAYOUT.TITLE_Y, w: LAYOUT.CONTENT_W, h: 0.8, 
             fontSize: LAYOUT.FONT_TITLE, 
             color: TEXT_COLOR, bold: true, shadow: TEXT_SHADOW, ...textBaseOpts, valign: "middle"
         });
 
-        // 内容区域
         const lines = slide.slide_type === 'two_column' 
             ? [...(slide.left_content||[]), ...(slide.right_content||[])] 
             : (slide.content || []);
             
         if (lines.length > 0) {
             slidePage.addText(lines.map(l => ({ 
-                text: l, 
+                text: sanitizeText(l), // [CTO Fix] 每一行内容都要清洗
                 options: { bullet: { code: '2022', color: BULLET_COLOR }, ...textBaseOpts } 
             })), { 
                 x: LAYOUT.MARGIN_X, y: LAYOUT.BODY_Y, w: LAYOUT.CONTENT_W, h: LAYOUT.BODY_H,
@@ -123,6 +127,6 @@ export const exportToPPTX = async (slides) => {
     }
   });
 
-  const fileName = (slides[0]?.title || "presentation").replace(/[\s\/\\:*?"<>|]+/g, "_") + ".pptx";
-  return pptx.writeFile({ fileName });
+  const safeFileName = sanitizeText(slides[0]?.title || "presentation").replace(/[\s\/\\:*?"<>|]+/g, "_");
+  return pptx.writeFile({ fileName: safeFileName + ".pptx" });
 };
