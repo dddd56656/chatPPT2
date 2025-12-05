@@ -1,16 +1,25 @@
 import PptxGenJS from "pptxgenjs";
 import { getSmartImageUrl } from "./smartImage"; 
 
+// [CONFIG] 宽屏布局参数 (13.33 x 7.5 inch)
+const LAYOUT = {
+    MARGIN_X: 0.7,      // 左边距 (英寸)
+    CONTENT_W: "90%",   // 内容宽
+    TITLE_Y: 0.4,       // 标题纵坐标
+    BODY_Y: 1.2,        // 正文纵坐标 (留出更多顶部呼吸空间)
+    BODY_H: 5.8,        // 内容高度 (7.5 - 1.2 - 0.5 = ~5.8 安全区域)
+    FONT_TITLE: 28,     // 标题字号 (大屏可以稍微大一点)
+    FONT_BODY: 16,      // 正文字号 (16pt 在宽屏上清晰且能容纳)
+    LINE_SPACING: 24    // 行间距 (舒适阅读)
+};
+
 const fetchImageToBase64 = async (url) => {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 8000);
-    
     const response = await fetch(url, { signal: controller.signal });
     clearTimeout(timeoutId);
-    
     if (!response.ok) throw new Error("Network error");
-    
     const blob = await response.blob();
     return new Promise((resolve) => {
       const reader = new FileReader();
@@ -42,7 +51,6 @@ export const exportToPPTX = async (slides) => {
     return { ...slide, _base64Image: base64Data };
   }));
 
-  // 初始化 PPT
   let PptxGenJS_Lib;
   try {
     const module = await import("pptxgenjs");
@@ -51,52 +59,53 @@ export const exportToPPTX = async (slides) => {
     throw new Error("导出组件加载失败");
   }
   const pptx = new PptxGenJS_Lib();
-  pptx.layout = "LAYOUT_16x9";
+  
+  // [CRITICAL CHANGE] 使用宽屏模式 (13.33 x 7.5 inches)
+  pptx.layout = "LAYOUT_WIDE"; 
+  
   pptx.title = slides[0]?.title || "Presentation";
 
   const TEXT_COLOR = "FFFFFF"; 
   const BULLET_COLOR = "1A73E8"; 
-  const TITLE_SHADOW = { type: 'outer', color: '000000', blur: 5, opacity: 0.8, offset: 0 }; 
+  const TEXT_SHADOW = { type: 'outer', color: '000000', blur: 3, opacity: 0.8, offset: 1, angle: 45 }; 
 
-  // [REPAIR FIX]: 移除 autofit，依赖手动设置的 w/h。
-  const textBaseOpts = { color: TEXT_COLOR, shadow: TITLE_SHADOW, isTextBox: true, valign: "top" }; 
+  const textBaseOpts = { color: TEXT_COLOR, shadow: TEXT_SHADOW, isTextBox: true, valign: "top" }; 
 
   slidesWithImages.forEach((slide) => {
     const slidePage = pptx.addSlide();
     const bgData = slide._base64Image;
 
-    // --- 背景层 ---
+    // 背景
     if (bgData) {
         slidePage.addImage({ data: bgData, x: 0, y: 0, w: "100%", h: "100%" });
-        slidePage.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: "100%", h: "100%", fill: { color: "000000", transparency: 85 } });
+        slidePage.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: "100%", h: "100%", fill: { color: "000000", transparency: 40 } });
     } else {
         slidePage.background = { color: "202124" }; 
     }
 
-    // --- 浮动文字层 ---
-
-    // 标题 (居中大字)
+    // 标题页
     if (slide.slide_type === "title") {
         slidePage.addText(slide.title || "Presentation", { 
-            x: "5%", y: "45%", w: "90%", h: 1, // 36pt
-            fontSize: 36, color: TEXT_COLOR, bold: true, align: "center", shadow: TITLE_SHADOW, ...textBaseOpts
+            x: 0.5, y: "40%", w: "90%", h: 1.5, 
+            fontSize: 44, // 宽屏大标题
+            color: TEXT_COLOR, bold: true, align: "center", shadow: TEXT_SHADOW, ...textBaseOpts
         });
         if (slide.subtitle) slidePage.addText(slide.subtitle, { 
-            x: "10%", y: "60%", w: "80%", h: 0.5, // 20pt
-            fontSize: 20, color: TEXT_COLOR, align: "center", shadow: TITLE_SHADOW, ...textBaseOpts
+            x: 0.5, y: "60%", w: "90%", h: 1, 
+            fontSize: 24, 
+            color: TEXT_COLOR, align: "center", shadow: TEXT_SHADOW, ...textBaseOpts
         });
     } 
-    // 内容/双栏
+    // 内容页
     else {
-        // 标题
+        // 页面标题
         slidePage.addText(slide.title || "Untitled", { 
-            x: 0.5, y: 0.4, w: "90%", h: 0.6, 
-            fontSize: 28, color: TEXT_COLOR, bold: true, shadow: TITLE_SHADOW, ...textBaseOpts, valign: "middle"
+            x: LAYOUT.MARGIN_X, y: LAYOUT.TITLE_Y, w: LAYOUT.CONTENT_W, h: 0.8, 
+            fontSize: LAYOUT.FONT_TITLE, 
+            color: TEXT_COLOR, bold: true, shadow: TEXT_SHADOW, ...textBaseOpts, valign: "middle"
         });
 
         // 内容区域
-        const contentX = 0.8;
-        const contentW = "88%";
         const lines = slide.slide_type === 'two_column' 
             ? [...(slide.left_content||[]), ...(slide.right_content||[])] 
             : (slide.content || []);
@@ -106,8 +115,9 @@ export const exportToPPTX = async (slides) => {
                 text: l, 
                 options: { bullet: { code: '2022', color: BULLET_COLOR }, ...textBaseOpts } 
             })), { 
-                x: contentX, y: 1.5, w: contentW, h: 5.8, // [FINAL FIX]: H 增加到 5.8，提供安全边际
-                fontSize: 16, lineSpacing: 28 
+                x: LAYOUT.MARGIN_X, y: LAYOUT.BODY_Y, w: LAYOUT.CONTENT_W, h: LAYOUT.BODY_H,
+                fontSize: LAYOUT.FONT_BODY,   
+                lineSpacing: LAYOUT.LINE_SPACING 
             }); 
         }
     }

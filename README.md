@@ -10,7 +10,7 @@ ChatPPT 是一个基于 **RAG (检索增强生成)** 和 **LLM (大语言模型)
 项目采用标准的**前后端分离**架构：
 
 * **Frontend**: React + Vite + MUI + Zustand (Store-Driven UI) + React Router (Client-side Routing)
-* **Backend**: Python FastAPI + LangChain + Celery (异步任务队列)
+* **Backend**: Python FastAPI + LangChain + milvus(rag)
 * **Infrastructure**: Redis (消息代理与缓存)
 
 
@@ -91,3 +91,9 @@ docker run -d -p 6379:6379 --name chatppt-redis redis:alpine
 
     *访问地址: http://localhost:3000* (端口可能因占用而变动，请查看终端输出)
 
+### 第三步：镜像打包 (容器)
+1.  **执行脚本**
+
+    ```bash
+    bash manage.sh
+    ```

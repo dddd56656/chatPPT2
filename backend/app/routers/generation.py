@@ -7,12 +7,13 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from app.services.outline import create_outline_generator
 from app.services.content import ContentGeneratorV1
-from app.schemas.task import ConversationalOutlineRequest, ConversationalContentRequest
+# [CTO Note]: Import updated from 'task' to 'generation'
+from app.schemas.generation import ConversationalOutlineRequest, ConversationalContentRequest
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# [CTO Fix]: 全局变量预定义，防止 NameError
+# 全局变量预定义
 outline_service = None
 content_service = None
 
@@ -23,21 +24,21 @@ try:
     logger.info("AI Services Initialized Successfully.")
 except Exception as e:
     logger.critical(f"Service Init Failed: {e}")
-    # 注意：这里不抛出异常，允许服务启动，但在调用时报错
 
 @router.post("/stream/outline")
 async def stream_outline(request: ConversationalOutlineRequest):
-    """SSE: 大纲生成"""
-    # [CTO Fix]: 调用前检查服务是否可用
+    """SSE: 大纲生成 (保持不变)"""
     if not outline_service:
         raise HTTPException(
             status_code=503, 
-            detail="AI Service Unavailable. Please check backend logs (API Key missing?)."
+            detail="AI Service Unavailable. Please check backend logs."
         )
 
     async def _generator():
         stream = outline_service.generate_outline_stream(
-            session_id=request.session_id, user_input=request.user_message
+            session_id=request.session_id, 
+            user_input=request.user_message,
+            rag_file_ids=request.rag_file_ids 
         )
         async for token in stream:
             payload = json.dumps({"text": token}, ensure_ascii=False)
@@ -48,7 +49,7 @@ async def stream_outline(request: ConversationalOutlineRequest):
 
 @router.post("/stream/content")
 async def stream_content(request: ConversationalContentRequest):
-    """SSE: 内容生成"""
+    """SSE: 内容生成/精修"""
     if not content_service:
         raise HTTPException(
             status_code=503, 
@@ -59,7 +60,9 @@ async def stream_content(request: ConversationalContentRequest):
         stream = content_service.generate_content_stream(
             session_id=request.session_id,
             user_input=request.user_message,
-            current_slides=request.current_slides
+            current_slides=request.current_slides,
+            # [New] 将 RAG 文件列表传递给服务层
+            rag_file_ids=request.rag_file_ids 
         )
         async for token in stream:
             payload = json.dumps({"text": token}, ensure_ascii=False)

@@ -1,32 +1,25 @@
-# 前端应用Dockerfile - 基于Node.js的多阶段构建
-FROM node:18-alpine AS builder
-
-# 设置工作目录
+# Stage 1: Build
+FROM node:20-alpine AS builder
 WORKDIR /app
-
-# 复制依赖文件
 COPY package*.json ./
-
-# 安装依赖
-RUN npm ci --only=production
-
-# 复制源代码
+RUN npm ci 
 COPY . .
-
-# 构建应用
 RUN npm run build
 
-# 生产阶段
+# Stage 2: Serve
 FROM nginx:alpine
 
-# 复制构建结果到nginx
-COPY --from=builder /app/dist /usr/share/nginx/html
-
-# 复制nginx配置
+# 清理默认配置
+RUN rm /etc/nginx/conf.d/default.conf
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# 暴露端口
-EXPOSE 3000
+# 拷贝静态文件
+COPY --from=builder /app/dist /usr/share/nginx/html
 
-# 启动nginx
+# 注入启动脚本 (用于生成 env-config.js)
+COPY entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
+EXPOSE 80
+ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]

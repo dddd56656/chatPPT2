@@ -1,32 +1,40 @@
 """
-FastAPI应用主入口文件 - 初始化应用实例和路由配置
+FastAPI应用主入口文件
 """
-
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.routers import router
+from app.services.rag import rag_service
 
-# 创建FastAPI应用实例
-app = FastAPI(title=settings.app_name, debug=settings.debug)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print(f"�� {settings.app_name} is starting up...")
+    try:
+        rag_service.initialize()
+    except Exception as e:
+        print(f"❌ Critical Error during startup: {e}")
+    yield
+    print(f"��� {settings.app_name} is shutting down...")
 
-# [CTO Fix]: 完善 CORS 策略，允许前端常用的 3000 端口
+app = FastAPI(
+    title=settings.app_name, 
+    debug=settings.debug,
+    lifespan=lifespan
+)
+
+# [Dynamic CORS] 解析逗号分隔的字符串
+origins_list = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",  # [New] Fix React default port
-        "http://127.0.0.1:3000",  # [New] Fix React default port
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-    ],
+    allow_origins=origins_list,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
 )
 
-# 注册所有API路由
 app.include_router(router, prefix="/api/v1")
 
 @app.get("/")

@@ -1,15 +1,12 @@
-# 服务模块初始化文件 - 导出核心业务服务类
-
+# 服务模块初始化 - 仅导出 AI 生成器
 from .outline import OutlineGenerator, create_outline_generator
 from .content import ContentGeneratorV1
-from .design import TemplateEngine
-from .exporter import PPTExporter, exporter_service
+from .rag import RagService, rag_service # [New] 导出 RAG 核心服务
 
 __all__ = [
     "OutlineGenerator",
     "create_outline_generator",
     "ContentGeneratorV1",
-    "TemplateEngine",
-    "PPTExporter",
-    "exporter_service",
+    "RagService", 
+    "rag_service", 
 ]

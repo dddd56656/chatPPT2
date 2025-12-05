@@ -1,43 +1,56 @@
 import axios from 'axios';
+import { getEnv } from '../utils/env';
+
+// 动态获取 Base URL
+const baseURL = getEnv('API_BASE_URL') || '';
 
 const apiClient = axios.create({
-  baseURL: '', // 依赖 Vite proxy
+  baseURL: baseURL, 
   timeout: 60000,
 });
 
 apiClient.interceptors.response.use(
-  (response) => response,
+  (response) => response.data,
   (error) => {
-    console.error('API Error:', error.response?.data || error.message);
-    return Promise.reject(error);
+    const message = error.response?.data?.message || error.message || 'Network Error';
+    console.error(`[API Fail] ${error.config?.url}:`, message);
+    return Promise.reject(new Error(message));
   }
 );
 
-// --- RAG API (文件上传) ---
 export const ragAPI = {
-  uploadFile: (file, sessionId) => {
+  uploadFile: (file, sessionId, onProgress) => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('session_id', sessionId);
+    
     return apiClient.post('/api/v1/rag/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: onProgress
+    });
+  },
+
+  listFiles: (sessionId, signal) => {
+    return apiClient.get(`/api/v1/rag/files`, {
+      params: { session_id: sessionId },
+      signal
+    });
+  },
+
+  deleteFile: (fileId) => {
+    return apiClient.delete(`/api/v1/rag/files/${fileId}`);
+  },
+
+  getIndexStatus: (sessionId) => {
+    return apiClient.get(`/api/v1/rag/status`, {
+      params: { session_id: sessionId }
     });
   }
 };
 
-// --- Streaming API ---
 export const streamEndpoints = {
-  outline: '/api/v1/stream/outline',
-  content: '/api/v1/stream/content',
+  outline: `${baseURL}/api/v1/stream/outline`,
+  content: `${baseURL}/api/v1/stream/content`,
 };
 
-// --- Task API ---
-export const generationAPI = {
-  exportPpt: (contentData) =>
-    apiClient.post('/api/v1/generation/export', { content: contentData }),
-};
-
-export const taskAPI = {
-  getTaskStatus: (taskId) => apiClient.get(`/api/v1/tasks/${taskId}`),
-  downloadPPT: (taskId) => apiClient.get(`/api/v1/tasks/${taskId}/file`, { responseType: 'blob' }),
-};
+export default apiClient;
