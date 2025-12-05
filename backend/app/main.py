@@ -10,13 +10,17 @@ from app.services.rag import rag_service
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print(f"ÔøΩÔøΩ {settings.app_name} is starting up...")
+    # [Startup]
+    print(f"[STARTUP] {settings.app_name} is starting up...")
     try:
         rag_service.initialize()
     except Exception as e:
-        print(f"‚ùå Critical Error during startup: {e}")
+        print(f"[ERROR] Critical Error during startup: {e}")
+    
     yield
-    print(f"Ìªë {settings.app_name} is shutting down...")
+    
+    # [Shutdown]
+    print(f"[SHUTDOWN] {settings.app_name} is shutting down...")
 
 app = FastAPI(
     title=settings.app_name, 
