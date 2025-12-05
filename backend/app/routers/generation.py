@@ -27,7 +27,7 @@ except Exception as e:
 
 @router.post("/stream/outline")
 async def stream_outline(request: ConversationalOutlineRequest):
-    """SSE: 大纲生成"""
+    """SSE: 大纲生成 (保持不变)"""
     if not outline_service:
         raise HTTPException(
             status_code=503, 
@@ -38,7 +38,6 @@ async def stream_outline(request: ConversationalOutlineRequest):
         stream = outline_service.generate_outline_stream(
             session_id=request.session_id, 
             user_input=request.user_message,
-            # [New] 将 RAG 文件列表传递给服务层
             rag_file_ids=request.rag_file_ids 
         )
         async for token in stream:
@@ -50,7 +49,7 @@ async def stream_outline(request: ConversationalOutlineRequest):
 
 @router.post("/stream/content")
 async def stream_content(request: ConversationalContentRequest):
-    """SSE: 内容生成 (保持不变)"""
+    """SSE: 内容生成/精修"""
     if not content_service:
         raise HTTPException(
             status_code=503, 
@@ -61,7 +60,9 @@ async def stream_content(request: ConversationalContentRequest):
         stream = content_service.generate_content_stream(
             session_id=request.session_id,
             user_input=request.user_message,
-            current_slides=request.current_slides
+            current_slides=request.current_slides,
+            # [New] 将 RAG 文件列表传递给服务层
+            rag_file_ids=request.rag_file_ids 
         )
         async for token in stream:
             payload = json.dumps({"text": token}, ensure_ascii=False)

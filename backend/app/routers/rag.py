@@ -24,13 +24,14 @@ async def upload_document(
         raise HTTPException(status_code=400, detail="No file uploaded")
     
     # 委派给核心服务处理
+    # 注意：service 内部已实现 initialize 检查，未就绪会报错
     return await rag_service.handle_file_upload(file, session_id)
 
 @router.get("/files", response_model=List[RagFileResponse])
 def list_documents(session_id: str):
     """
     获取文件列表接口
-    - 目前是 Mock 实现 (返回空列表)，未来对接 Redis/SQL
+    - 读取 JSON 元数据
     """
     return rag_service.list_files(session_id)
 

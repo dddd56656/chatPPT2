@@ -1,8 +1,9 @@
 import os
 import uuid
 import shutil
+import json
 import logging
-from typing import List, Optional
+from typing import List
 from datetime import datetime
 from fastapi import UploadFile
 
@@ -18,45 +19,88 @@ from app.schemas.rag import RagFileResponse
 
 logger = logging.getLogger(__name__)
 
-# 临时文件存储路径 (用于解析)
+# 临时文件存储路径
 TEMP_UPLOAD_DIR = "./temp_uploads"
+METADATA_FILE = "./rag_metadata.json"
+
 os.makedirs(TEMP_UPLOAD_DIR, exist_ok=True)
 
 class RagService:
     def __init__(self):
-        # 1. 初始化本地 Embedding (使用免费的 HuggingFace 模型)
-        logger.info(f"Loading Local Embedding Model: {settings.embedding_model_name} ...")
-        self.embeddings = HuggingFaceEmbeddings(
-            model_name=settings.embedding_model_name,
-            model_kwargs={'device': 'cpu'}, # 默认使用 CPU
-            encode_kwargs={'normalize_embeddings': True}
-        )
+        # [CTO Standard]: 构造函数保持极简，绝不执行耗时操作 (如 I/O 或模型加载)
+        # 这确保了文件被导入时不会阻塞进程，解决了 Windows/Docker 的启动超时问题
+        self.vector_store = None
+        self.embeddings = None
+        self._is_initialized = False
+        logger.info("RAG Service instantiated. Waiting for explicit initialization...")
 
-        # 2. 连接 Milvus
-        # LangChain 会自动处理连接和 Collection 创建
-        self.vector_store = Milvus(
-            embedding_function=self.embeddings,
-            connection_args={
-                "host": settings.milvus_host, 
-                "port": settings.milvus_port
-            },
-            collection_name=settings.milvus_collection,
-            auto_id=True
-        )
-        logger.info("RAG Service Initialized (Local Embedding).")
+    def initialize(self):
+        """
+        [Lifecycle Hook]: 显式初始化方法
+        将在 app/main.py 的 lifespan 启动阶段被调用。
+        """
+        if self._is_initialized:
+            logger.info("RAG Service already initialized.")
+            return
 
+        logger.info("🚀 [Startup] Initializing AI Models & Vector DB Connection...")
+        try:
+            # 1. 加载本地 Embedding (耗时操作)
+            logger.info(f"   - Loading Model: {settings.embedding_model_name}...")
+            self.embeddings = HuggingFaceEmbeddings(
+                model_name=settings.embedding_model_name,
+                model_kwargs={'device': 'cpu'},
+                encode_kwargs={'normalize_embeddings': True}
+            )
+
+            # 2. 连接 Milvus
+            logger.info(f"   - Connecting to Milvus at {settings.milvus_host}:{settings.milvus_port}...")
+            self.vector_store = Milvus(
+                embedding_function=self.embeddings,
+                connection_args={
+                    "host": settings.milvus_host, 
+                    "port": settings.milvus_port
+                },
+                collection_name=settings.milvus_collection,
+                auto_id=True
+            )
+            
+            # 3. 初始化元数据文件
+            if not os.path.exists(METADATA_FILE):
+                with open(METADATA_FILE, 'w', encoding='utf-8') as f:
+                    json.dump({}, f)
+
+            self._is_initialized = True
+            logger.info("✅ [Startup] RAG Service is READY!")
+            
+        except Exception as e:
+            # 初始化失败直接抛出，阻止应用启动（Fail Fast）
+            logger.critical(f"❌ RAG Initialization Failed: {e}")
+            raise e
+
+    def _load_metadata(self) -> dict:
+        try:
+            with open(METADATA_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def _save_metadata(self, data: dict):
+        with open(METADATA_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    # 业务方法：必须检查是否已初始化
     async def handle_file_upload(self, file: UploadFile, session_id: str) -> RagFileResponse:
-        """核心流程: 上传 -> 保存 -> 解析 -> 切分 -> 向量化(Local) -> 入库"""
+        if not self._is_initialized:
+            raise RuntimeError("RAG Service not initialized. Check startup logs.")
+
         file_id = str(uuid.uuid4())
         file_path = os.path.join(TEMP_UPLOAD_DIR, f"{file_id}_{file.filename}")
         
         try:
-            # 1. 保存临时文件
             with open(file_path, "wb") as buffer:
-                # 使用 shutil.copyfileobj 是处理 UploadFile 的标准做法
                 shutil.copyfileobj(file.file, buffer)
 
-            # 2. 根据后缀选择加载器
             loader = None
             if file.filename.endswith(".pdf"):
                 loader = PyPDFLoader(file_path)
@@ -65,30 +109,31 @@ class RagService:
             else:
                 loader = TextLoader(file_path, encoding="utf-8")
 
-            # 3. 加载并切分 (Chunking)
-            # [Best Practice]: RecursiveCharacterTextSplitter 适合处理复杂文本
             text_splitter = RecursiveCharacterTextSplitter(chunk_size=600, chunk_overlap=100)
             docs = loader.load_and_split(text_splitter)
 
-            # 4. 注入 Metadata (检索过滤的关键)
-            # 必须给每个切片打上 session_id 和 file_id 的标签，以便后续精确检索和删除
             for doc in docs:
                 doc.metadata["session_id"] = session_id
                 doc.metadata["file_id"] = file_id
                 doc.metadata["file_name"] = file.filename
                 doc.metadata["timestamp"] = datetime.now().isoformat()
 
-            # 5. 写入 Milvus (向量化与入库)
             if docs:
                 self.vector_store.add_documents(docs)
 
-            return RagFileResponse(
-                id=file_id,
-                name=file.filename,
-                size=file.size,
-                status="indexed",
-                upload_time=datetime.now().strftime("%Y-%m-%d %H:%M")
-            )
+            metadata = self._load_metadata()
+            file_info = {
+                "id": file_id,
+                "name": file.filename,
+                "size": file.size,
+                "status": "indexed",
+                "upload_time": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "session_id": session_id
+            }
+            metadata[file_id] = file_info
+            self._save_metadata(metadata)
+
+            return RagFileResponse(**file_info)
 
         except Exception as e:
             logger.error(f"RAG Upload Failed: {e}", exc_info=True)
@@ -96,33 +141,41 @@ class RagService:
                 id=file_id, name=file.filename, size=0, status="error", upload_time=""
             )
         finally:
-            # 清理临时文件，符合 SRE 规范
             if os.path.exists(file_path):
                 os.remove(file_path)
 
     def search_context(self, query: str, session_id: str, k: int = 3) -> str:
-        """语义检索: 根据 Query 和 SessionID 查找相关片段"""
+        if not self._is_initialized:
+            logger.error("RAG Service not initialized during search.")
+            return ""
+            
         try:
-            # [Milvus Filter]: 只搜索当前会话的文档，隔离数据
             expr = f'session_id == "{session_id}"'
             docs = self.vector_store.similarity_search(query, k=k, expr=expr)
-            
-            # 将检索到的片段拼接成字符串，用于注入 Prompt
             return "\n\n".join([doc.page_content for doc in docs])
         except Exception as e:
             logger.warning(f"RAG Search failed: {e}")
             return ""
 
     def list_files(self, session_id: str) -> List[RagFileResponse]:
-        """文件列表 (目前为占位函数)"""
-        # [CTO Note]: 在生产环境中，你需要一个额外的 SQL/Redis 表来存储文件元数据，才能高效列出文件。
-        # 由于我们没有这个表，这里暂时返回空列表。
-        return []
+        # list_files 仅读 JSON，无需 AI 模型，即使未初始化也可运行（增强鲁棒性）
+        metadata = self._load_metadata()
+        user_files = [
+            RagFileResponse(**info) 
+            for info in metadata.values() 
+            if info.get("session_id") == session_id
+        ]
+        return sorted(user_files, key=lambda x: x.upload_time, reverse=True)
 
     def delete_file(self, file_id: str):
-        """物理删除向量"""
-        # Milvus 删除操作是基于 Metadata 过滤的
+        if not self._is_initialized:
+             raise RuntimeError("RAG Service not initialized.")
+
         self.vector_store.delete(expr=f'file_id == "{file_id}"')
+        metadata = self._load_metadata()
+        if file_id in metadata:
+            del metadata[file_id]
+            self._save_metadata(metadata)
 
 # 单例导出
 rag_service = RagService()

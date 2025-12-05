@@ -3,6 +3,7 @@ import json
 import sys
 from typing import AsyncGenerator, List, Dict, Any
 from app.core.config import settings
+from app.services.rag import rag_service # [New] 导入 RAG 核心服务
 
 try:
     from langchain_openai import ChatOpenAI
@@ -60,12 +61,34 @@ class ContentGeneratorV1:
             ttl=3600
         )
 
-    async def generate_content_stream(self, session_id: str, user_input: str, current_slides: List[Dict[str, Any]]) -> AsyncGenerator[str, None]:
+    # [Modified] 接收 rag_file_ids
+    async def generate_content_stream(self, session_id: str, user_input: str, current_slides: List[Dict[str, Any]], rag_file_ids: list = None) -> AsyncGenerator[str, None]:
         logger.info(f"[Refine Start] Session: {session_id}")
+        
+        # 1. RAG 检索逻辑
+        context_str = ""
+        if rag_file_ids and user_input:
+            logger.info("RAG Activated: Retrieving context for content refinement.")
+            # 调用 RAG Service 进行语义检索
+            context_str = rag_service.search_context(user_input, session_id)
+
+        # 2. 构造最终输入，注入上下文
+        slides_str = json.dumps(current_slides, ensure_ascii=False)
+        final_input = f"{user_input} (Return FULL JSON, Chinese)"
+        
+        if context_str:
+            # [Critical Injection]: 将检索到的上下文置于用户输入之前
+            rag_prefix = f"""
+            --- 知识库参考内容 START ---
+            请严格参考以下知识库内容来精修幻灯片内容，如果上下文内容与用户指令相关，则将其作为精修的基础:
+            {context_str}
+            --- 知识库参考内容 END ---
+            """
+            final_input = rag_prefix + final_input
+            logger.info("Context successfully injected into refinement prompt.")
+
         try:
-            slides_str = json.dumps(current_slides, ensure_ascii=False)
-            final_input = f"{user_input} (Return FULL JSON, Chinese)"
-            
+            # 3. 调用链
             async for chunk in self.chain.astream(
                 {
                     "input": final_input,
