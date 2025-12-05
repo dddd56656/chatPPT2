@@ -3,6 +3,7 @@ import json
 import sys
 from typing import AsyncGenerator
 from app.core.config import settings
+from app.services.rag import rag_service # [New] 导入 RAG 核心服务
 
 try:
     from langchain_openai import ChatOpenAI
@@ -15,7 +16,7 @@ except ImportError:
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# [CTO Fix]: 纯净版 Prompt，无 Emoji，确保 Windows 兼容
+# [CTO Fix]: 纯净版 Prompt
 OUTLINE_SYSTEM_PROMPT = """You are an expert Data-to-PPT Architect.
 
 **TASK**: 
@@ -93,11 +94,33 @@ class OutlineGenerator:
             ttl=3600
         )
 
-    async def generate_outline_stream(self, session_id: str, user_input: str) -> AsyncGenerator[str, None]:
+    # [Modified] 接收 rag_file_ids
+    async def generate_outline_stream(self, session_id: str, user_input: str, rag_file_ids: list = None) -> AsyncGenerator[str, None]:
         logger.info(f"[Gen Start] Session: {session_id}")
+        
+        # 1. RAG 检索逻辑
+        context_str = ""
+        if rag_file_ids and user_input:
+            logger.info(f"RAG Activated: Retrieving context for session {session_id}")
+            # 调用 RAG Service 进行语义检索
+            context_str = rag_service.search_context(user_input, session_id)
+
+        # 2. 构造最终输入，注入上下文
+        final_input = f"{user_input} (Output JSON Array, Simplified Chinese)"
+        
+        if context_str:
+            # [Critical Injection]: 将检索到的上下文置于用户输入之前，作为 LLM 的主要参考
+            rag_prefix = f"""
+            --- 知识库参考内容 START ---
+            请严格参考以下知识库内容来生成大纲和内容，如果上下文内容与用户指令相关，则将其作为生成的基础:
+            {context_str}
+            --- 知识库参考内容 END ---
+            """
+            final_input = rag_prefix + final_input
+            logger.info("Context successfully injected into prompt.")
+
         try:
-            final_input = f"{user_input} (Output JSON Array, Simplified Chinese)"
-            
+            # 3. 调用链 (将修改后的 final_input 传给 LLM)
             async for chunk in self.chain.astream(
                 {"input": final_input},
                 config={"configurable": {"session_id": session_id}}

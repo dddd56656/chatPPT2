@@ -36,7 +36,10 @@ async def stream_outline(request: ConversationalOutlineRequest):
 
     async def _generator():
         stream = outline_service.generate_outline_stream(
-            session_id=request.session_id, user_input=request.user_message
+            session_id=request.session_id, 
+            user_input=request.user_message,
+            # [New] 将 RAG 文件列表传递给服务层
+            rag_file_ids=request.rag_file_ids 
         )
         async for token in stream:
             payload = json.dumps({"text": token}, ensure_ascii=False)
@@ -47,7 +50,7 @@ async def stream_outline(request: ConversationalOutlineRequest):
 
 @router.post("/stream/content")
 async def stream_content(request: ConversationalContentRequest):
-    """SSE: 内容生成"""
+    """SSE: 内容生成 (保持不变)"""
     if not content_service:
         raise HTTPException(
             status_code=503, 
