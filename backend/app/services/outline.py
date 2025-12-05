@@ -16,7 +16,8 @@ except ImportError:
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# [CTO Standard] Prompt: Explicit, Clean, Robust
+# [CTO Fix]: LangChain Template 语法修正
+# 注意：JSON 示例中的大括号必须双写 {{...}} 才能被识别为纯文本，否则会被当做变量
 OUTLINE_SYSTEM_PROMPT = """You are an expert Data-to-PPT Architect.
 
 **TASK**: 
@@ -31,22 +32,22 @@ Analyze the user's input.
 
 **JSON STRUCTURE (Array)**:
 [
-  {
+  {{
     "slide_type": "title",
     "title": "Main Title",
     "subtitle": "Subtitle",
     "image_prompt": "abstract tech background"
-  },
-  {
+  }},
+  {{
     "slide_type": "content",
     "title": "Slide Title",
     "content": ["Point 1", "Point 2"],
     "image_prompt": "office meeting"
-  }
+  }}
 ]
 
 **REFUSAL POLICY**:
-- If input is empty or just "Hello", return: { "refusal": "Please provide a topic." }
+- If input is empty or just "Hello", return: {{ "refusal": "Please provide a topic." }}
 - Otherwise, ALWAYS generate the JSON structure.
 """
 
@@ -93,22 +94,19 @@ class OutlineGenerator:
         if rag_file_ids:
             logger.info(f"RAG Active: {len(rag_file_ids)} files selected.")
             
-            # Smart Query: If input is too short, augment it to ensure retrieval
             search_query = user_input
             if len(user_input) < 10: 
                 search_query = "Summary key points main content"
             
-            # 1. Try Semantic Search
             context_str = rag_service.search_context(search_query, session_id)
             
-            # 2. Fallback: Direct File Fetch if search fails
             if not context_str:
                 logger.warning("Semantic search empty. Fallback to file preview.")
                 context_str = rag_service.fetch_file_preview(rag_file_ids)
 
         # --- Logic Branch 2: Construct Final Prompt ---
+        # 注意：这里的 f-string 是 Python 层的变量替换，不需要双大括号
         if context_str:
-            # Case A: With Context (RAG)
             final_input = f"""
             === [Knowledge Base Context] START ===
             {context_str}
@@ -119,7 +117,6 @@ class OutlineGenerator:
             """
             logger.info("Mode: RAG Generation")
         else:
-            # Case B: Direct Generation (LLM Native Knowledge)
             final_input = f"""
             User Request: {user_input}
             Instruction: Generate a professional PPT outline based on this topic. Use Simplified Chinese. Output JSON Array.

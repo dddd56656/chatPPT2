@@ -13,15 +13,6 @@ const LAYOUT = {
     LINE_SPACING: 24    
 };
 
-// [CTO Fix]: 文本清洗工具 - 移除不可见的 XML 非法字符
-// 这是解决 "PPT无法读取" 问题的核心
-const sanitizeText = (str) => {
-    if (!str) return "";
-    // 移除 ASCII 控制字符 (0-8, 11-12, 14-31)，保留换行符(\n)和制表符(\t)
-    // 这种字符通常是 LLM 生成时的幻觉噪音
-    return String(str).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
-};
-
 const fetchImageToBase64 = async (url) => {
   try {
     const controller = new AbortController();
@@ -70,11 +61,11 @@ export const exportToPPTX = async (slides) => {
   const pptx = new PptxGenJS_Lib();
   
   pptx.layout = "LAYOUT_WIDE"; 
-  // [CTO Fix] 清洗标题
-  pptx.title = sanitizeText(slides[0]?.title || "Presentation");
+  pptx.title = slides[0]?.title || "Presentation";
 
   const TEXT_COLOR = "FFFFFF"; 
   const BULLET_COLOR = "1A73E8"; 
+  // [VISUAL] 保持强阴影，确保无遮罩时的可读性
   const TEXT_SHADOW = { type: 'outer', color: '000000', blur: 3, opacity: 0.8, offset: 1, angle: 45 }; 
 
   const textBaseOpts = { color: TEXT_COLOR, shadow: TEXT_SHADOW, isTextBox: true, valign: "top" }; 
@@ -83,28 +74,30 @@ export const exportToPPTX = async (slides) => {
     const slidePage = pptx.addSlide();
     const bgData = slide._base64Image;
 
+    // --- 背景层 ---
     if (bgData) {
+        // [CTO Fix] 仅添加图片，彻底移除黑色遮罩层 (rect shape)
         slidePage.addImage({ data: bgData, x: 0, y: 0, w: "100%", h: "100%" });
-        slidePage.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: "100%", h: "100%", fill: { color: "000000", transparency: 40 } });
     } else {
         slidePage.background = { color: "202124" }; 
     }
 
-    // [CTO Fix] 全面应用 sanitizeText
+    // --- 浮动文字层 ---
+
     if (slide.slide_type === "title") {
-        slidePage.addText(sanitizeText(slide.title || "Presentation"), { 
+        slidePage.addText(slide.title || "Presentation", { 
             x: 0.5, y: "40%", w: "90%", h: 1.5, 
             fontSize: 44, 
             color: TEXT_COLOR, bold: true, align: "center", shadow: TEXT_SHADOW, ...textBaseOpts
         });
-        if (slide.subtitle) slidePage.addText(sanitizeText(slide.subtitle), { 
+        if (slide.subtitle) slidePage.addText(slide.subtitle, { 
             x: 0.5, y: "60%", w: "90%", h: 1, 
             fontSize: 24, 
             color: TEXT_COLOR, align: "center", shadow: TEXT_SHADOW, ...textBaseOpts
         });
     } 
     else {
-        slidePage.addText(sanitizeText(slide.title || "Untitled"), { 
+        slidePage.addText(slide.title || "Untitled", { 
             x: LAYOUT.MARGIN_X, y: LAYOUT.TITLE_Y, w: LAYOUT.CONTENT_W, h: 0.8, 
             fontSize: LAYOUT.FONT_TITLE, 
             color: TEXT_COLOR, bold: true, shadow: TEXT_SHADOW, ...textBaseOpts, valign: "middle"
@@ -116,7 +109,7 @@ export const exportToPPTX = async (slides) => {
             
         if (lines.length > 0) {
             slidePage.addText(lines.map(l => ({ 
-                text: sanitizeText(l), // [CTO Fix] 每一行内容都要清洗
+                text: l, 
                 options: { bullet: { code: '2022', color: BULLET_COLOR }, ...textBaseOpts } 
             })), { 
                 x: LAYOUT.MARGIN_X, y: LAYOUT.BODY_Y, w: LAYOUT.CONTENT_W, h: LAYOUT.BODY_H,
@@ -127,6 +120,6 @@ export const exportToPPTX = async (slides) => {
     }
   });
 
-  const safeFileName = sanitizeText(slides[0]?.title || "presentation").replace(/[\s\/\\:*?"<>|]+/g, "_");
-  return pptx.writeFile({ fileName: safeFileName + ".pptx" });
+  const fileName = (slides[0]?.title || "presentation").replace(/[\s\/\\:*?"<>|]+/g, "_") + ".pptx";
+  return pptx.writeFile({ fileName });
 };
