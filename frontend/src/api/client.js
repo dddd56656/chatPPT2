@@ -14,6 +14,7 @@ apiClient.interceptors.response.use(
 );
 
 // --- RAG API (文件上传) ---
+// [Retention]: 仍用于上传参考文档
 export const ragAPI = {
   uploadFile: (file, sessionId) => {
     const formData = new FormData();
@@ -26,18 +27,10 @@ export const ragAPI = {
 };
 
 // --- Streaming API ---
+// [Retention]: 核心 AI 生成流
 export const streamEndpoints = {
   outline: '/api/v1/stream/outline',
   content: '/api/v1/stream/content',
 };
 
-// --- Task API ---
-export const generationAPI = {
-  exportPpt: (contentData) =>
-    apiClient.post('/api/v1/generation/export', { content: contentData }),
-};
-
-export const taskAPI = {
-  getTaskStatus: (taskId) => apiClient.get(`/api/v1/tasks/${taskId}`),
-  downloadPPT: (taskId) => apiClient.get(`/api/v1/tasks/${taskId}/file`, { responseType: 'blob' }),
-};
+// [CTO Cleanup]: Removed deprecated 'generationAPI' and 'taskAPI' (SSR logic)

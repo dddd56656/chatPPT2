@@ -1,75 +1,72 @@
-version: '3.8'
-
+version: '3.5'
 services:
-  # Redis服务 - 用于Celery任务队列和缓存
-  redis:
-    image: redis:7-alpine
-    container_name: chatppt-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    networks:
-      - chatppt-network
-
-  # 后端API服务
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: chatppt-backend
-    ports:
-      - "8000:8000"
+  # 1. Etcd: 用于存储 Milvus 的元数据 (Schema, Node info)
+  etcd:
+    container_name: milvus-etcd
+    image: quay.io/coreos/etcd:v3.5.5
     environment:
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
     volumes:
-      - ./backend/output:/app/output
-      - ./backend/templates:/app/templates
-    depends_on:
-      - redis
-    networks:
-      - chatppt-network
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/etcd:/etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls=http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
 
-  # Celery Worker服务
-  celery-worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: chatppt-celery-worker
-    command: celery -A app.core.celery_app worker --loglevel=info
+  # 2. MinIO: 用于存储向量数据块和日志 (S3 Compatible Storage)
+  minio:
+    container_name: milvus-minio
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
     environment:
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-    volumes:
-      - ./backend/output:/app/output
-      - ./backend/templates:/app/templates
-    depends_on:
-      - redis
-      - backend
-    networks:
-      - chatppt-network
-
-  # 前端React应用
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: chatppt-frontend
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
     ports:
-      - "3000:3000"
-    environment:
-      - VITE_API_BASE_URL=http://localhost:8000
-    depends_on:
-      - backend
-    networks:
-      - chatppt-network
+      - "9001:9001"
+      - "9000:9000"
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/minio:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
 
-volumes:
-  redis_data:
+  # 3. Milvus Standalone: 核心向量数据库服务
+  standalone:
+    container_name: milvus-standalone
+    image: milvusdb/milvus:v2.4.0
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+    - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/milvus:/var/lib/milvus
+    ports:
+      - "19530:19530" # gRPC 端口 (主要交互端口)
+      - "9091:9091"   # HTTP 端口
+    depends_on:
+      - "etcd"
+      - "minio"
+
+  # 4. Attu: Milvus 官方可视化管理工具 (类似 Navicat)
+  attu:
+    container_name: milvus-attu
+    image: zilliz/attu:v2.4.0
+    environment:
+      MILVUS_URL: standalone:19530
+    ports:
+      - "8000:3000" # 浏览器访问 localhost:8000
+    depends_on:
+      - "standalone"
 
 networks:
-  chatppt-network:
-    driver: bridge
+  default:
+    name: milvus
