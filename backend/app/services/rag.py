@@ -7,7 +7,6 @@ from typing import List
 from datetime import datetime
 from fastapi import UploadFile
 
-# LangChain RAG 核心依赖
 from langchain_huggingface import HuggingFaceEmbeddings 
 from langchain_milvus import Milvus
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
@@ -19,7 +18,6 @@ from app.schemas.rag import RagFileResponse
 
 logger = logging.getLogger(__name__)
 
-# 临时文件存储路径
 TEMP_UPLOAD_DIR = "./temp_uploads"
 METADATA_FILE = "./rag_metadata.json"
 
@@ -27,25 +25,17 @@ os.makedirs(TEMP_UPLOAD_DIR, exist_ok=True)
 
 class RagService:
     def __init__(self):
-        # [CTO Standard]: 构造函数保持极简，绝不执行耗时操作 (如 I/O 或模型加载)
-        # 这确保了文件被导入时不会阻塞进程，解决了 Windows/Docker 的启动超时问题
         self.vector_store = None
         self.embeddings = None
         self._is_initialized = False
         logger.info("RAG Service instantiated. Waiting for explicit initialization...")
 
     def initialize(self):
-        """
-        [Lifecycle Hook]: 显式初始化方法
-        将在 app/main.py 的 lifespan 启动阶段被调用。
-        """
         if self._is_initialized:
-            logger.info("RAG Service already initialized.")
             return
 
-        logger.info("🚀 [Startup] Initializing AI Models & Vector DB Connection...")
+        logger.info("[Startup] Initializing RAG Service...")
         try:
-            # 1. 加载本地 Embedding (耗时操作)
             logger.info(f"   - Loading Model: {settings.embedding_model_name}...")
             self.embeddings = HuggingFaceEmbeddings(
                 model_name=settings.embedding_model_name,
@@ -53,7 +43,6 @@ class RagService:
                 encode_kwargs={'normalize_embeddings': True}
             )
 
-            # 2. 连接 Milvus
             logger.info(f"   - Connecting to Milvus at {settings.milvus_host}:{settings.milvus_port}...")
             self.vector_store = Milvus(
                 embedding_function=self.embeddings,
@@ -65,17 +54,15 @@ class RagService:
                 auto_id=True
             )
             
-            # 3. 初始化元数据文件
             if not os.path.exists(METADATA_FILE):
                 with open(METADATA_FILE, 'w', encoding='utf-8') as f:
                     json.dump({}, f)
 
             self._is_initialized = True
-            logger.info("✅ [Startup] RAG Service is READY!")
+            logger.info("[Startup] RAG Service is READY.")
             
         except Exception as e:
-            # 初始化失败直接抛出，阻止应用启动（Fail Fast）
-            logger.critical(f"❌ RAG Initialization Failed: {e}")
+            logger.critical(f"[Error] RAG Init Failed: {e}")
             raise e
 
     def _load_metadata(self) -> dict:
@@ -89,10 +76,9 @@ class RagService:
         with open(METADATA_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
-    # 业务方法：必须检查是否已初始化
     async def handle_file_upload(self, file: UploadFile, session_id: str) -> RagFileResponse:
         if not self._is_initialized:
-            raise RuntimeError("RAG Service not initialized. Check startup logs.")
+            raise RuntimeError("RAG Service not initialized.")
 
         file_id = str(uuid.uuid4())
         file_path = os.path.join(TEMP_UPLOAD_DIR, f"{file_id}_{file.filename}")
@@ -136,7 +122,7 @@ class RagService:
             return RagFileResponse(**file_info)
 
         except Exception as e:
-            logger.error(f"RAG Upload Failed: {e}", exc_info=True)
+            logger.error(f"[Error] Upload Failed: {e}", exc_info=True)
             return RagFileResponse(
                 id=file_id, name=file.filename, size=0, status="error", upload_time=""
             )
@@ -146,7 +132,6 @@ class RagService:
 
     def search_context(self, query: str, session_id: str, k: int = 3) -> str:
         if not self._is_initialized:
-            logger.error("RAG Service not initialized during search.")
             return ""
             
         try:
@@ -154,11 +139,27 @@ class RagService:
             docs = self.vector_store.similarity_search(query, k=k, expr=expr)
             return "\n\n".join([doc.page_content for doc in docs])
         except Exception as e:
-            logger.warning(f"RAG Search failed: {e}")
+            logger.warning(f"[Warn] Search failed: {e}")
+            return ""
+
+    def fetch_file_preview(self, file_ids: List[str], limit_per_file: int = 2) -> str:
+        if not self._is_initialized or not file_ids: return ""
+        try:
+            context_pieces = []
+            for fid in file_ids:
+                docs = self.vector_store.similarity_search(
+                    query="", 
+                    k=limit_per_file, 
+                    expr=f'file_id == "{fid}"'
+                )
+                for doc in docs:
+                    context_pieces.append(f"[File Content]: {doc.page_content}")
+            return "\n\n".join(context_pieces)
+        except Exception as e:
+            logger.error(f"[Error] Preview fetch failed: {e}")
             return ""
 
     def list_files(self, session_id: str) -> List[RagFileResponse]:
-        # list_files 仅读 JSON，无需 AI 模型，即使未初始化也可运行（增强鲁棒性）
         metadata = self._load_metadata()
         user_files = [
             RagFileResponse(**info) 
@@ -177,5 +178,4 @@ class RagService:
             del metadata[file_id]
             self._save_metadata(metadata)
 
-# 单例导出
 rag_service = RagService()

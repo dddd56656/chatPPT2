@@ -1,5 +1,5 @@
 """
-FastAPI应用主入口文件
+FastAPI Application Entry Point
 """
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -28,7 +28,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# [Dynamic CORS] 解析逗号分隔的字符串
+# [Dynamic CORS]
 origins_list = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
 
 app.add_middleware(
