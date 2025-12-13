@@ -1,4 +1,6 @@
 import os
+# c盘容量不足时使用下面代码，打包时请注释掉
+# os.environ["HF_HOME"] = os.path.abspath("./model_cache")
 import uuid
 import shutil
 import json
